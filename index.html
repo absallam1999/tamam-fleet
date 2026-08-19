@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <!-- ============================================
+         Document Configuration
+         ============================================ -->
+    <meta charset="UTF-8" />
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+
+    <meta
+      name="description"
+      content="منصة تحكم المشرف من تمام — إدارة الأسطول والسائقين والطلبات والمحفظة والتقارير من مكان واحد."
+    />
+
+    <meta
+      name="keywords"
+      content="تمام, Tamam, مشرف, إدارة الأسطول, منصة المشرف, إدارة السائقين, إدارة الطلبات, المحفظة, التقارير, Fleet Supervisor"
+    />
+
+    <meta name="author" content="Tamam" />
+
+    <meta name="application-name" content="Tamam Fleet" />
+
+    <meta name="generator" content="Vite" />
+
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <!-- Prevent automatic phone/email detection -->
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- ============================================
+         Theme & Browser UI
+         ============================================ -->
+    <meta name="color-scheme" content="light dark" />
+
+    <meta
+      name="theme-color"
+      content="#047857"
+      media="(prefers-color-scheme: light)"
+    />
+
+    <meta
+      name="theme-color"
+      content="#022c22"
+      media="(prefers-color-scheme: dark)"
+    />
+
+    <!-- ============================================
+         Favicon
+         ============================================ -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <!-- ============================================
+         Canonical URL
+         ============================================ -->
+    <link rel="canonical" href="https://fleet.tamaam.cloud/" />
+
+    <!-- ============================================
+         Open Graph / Social Sharing
+         ============================================ -->
+    <meta property="og:type" content="website" />
+
+    <meta property="og:title" content="منصة تحكم المشرف | Tamam Fleet" />
+
+    <meta
+      property="og:description"
+      content="منصة متكاملة لإدارة أسطولك من تمام — السائقين والطلبات والمحفظة والتقارير."
+    />
+
+    <meta property="og:url" content="https://fleet.tamaam.cloud/" />
+
+    <meta property="og:site_name" content="Tamam" />
+
+    <meta property="og:locale" content="ar_EG" />
+
+    <meta property="og:locale:alternate" content="en_US" />
+
+    <meta
+      property="og:image"
+      content="https://fleet.tamaam.cloud/images/og-image.png"
+    />
+    <meta property="og:image:alt" content="Tamam Fleet Control Platform" />
+
+    <!-- ============================================
+         Twitter / X Card
+         ============================================ -->
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <meta name="twitter:title" content="منصة تحكم المشرف | Tamam Fleet" />
+
+    <meta
+      name="twitter:description"
+      content="منصة متكاملة لإدارة أسطولك من تمام."
+    />
+
+    <meta
+      name="twitter:image"
+      content="https://fleet.tamaam.cloud/images/og-image.png"
+    />
+
+    <!-- ============================================
+         PWA / Web App
+         ============================================ -->
+
+    <!-- Uncomment when manifest.json exists -->
+    <!-- <link rel="manifest" href="/manifest.json" /> -->
+
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+    <meta name="apple-mobile-web-app-title" content="Tamam Fleet" />
+
+    <!-- ============================================
+         Initial Theme & Language
+         Prevents Flash of Incorrect Theme (FOIT/FOUT)
+         ============================================ -->
+    <script>
+      (() => {
+        try {
+          const THEME_KEY = "fleet-theme-preference";
+          const LANGUAGE_KEY = "fleet-language";
+
+          const root = document.documentElement;
+
+          /* --------------------------------------------
+             Theme
+             -------------------------------------------- */
+
+          const storedTheme = localStorage.getItem(THEME_KEY);
+
+          const theme =
+            storedTheme === "light" ||
+            storedTheme === "dark" ||
+            storedTheme === "system"
+              ? storedTheme
+              : "system";
+
+          /*
+           * Persist the normalized value so the application
+           * always works with a known theme preference.
+           */
+          localStorage.setItem(THEME_KEY, theme);
+
+          const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+          const applyTheme = () => {
+            const isDark =
+              theme === "dark" || (theme === "system" && mediaQuery.matches);
+
+            root.classList.toggle("dark", isDark);
+
+            root.style.colorScheme = isDark ? "dark" : "light";
+          };
+
+          applyTheme();
+
+          /*
+           * React to OS theme changes only while using
+           * the System preference.
+           */
+          if (theme === "system") {
+            const handleSystemThemeChange = (event) => {
+              root.classList.toggle("dark", event.matches);
+              root.style.colorScheme = event.matches ? "dark" : "light";
+            };
+
+            if (mediaQuery.addEventListener) {
+              mediaQuery.addEventListener("change", handleSystemThemeChange);
+            } else {
+              // Legacy Safari support
+              mediaQuery.addListener(handleSystemThemeChange);
+            }
+          }
+
+          /* --------------------------------------------
+             Language
+             -------------------------------------------- */
+
+          const storedLanguage = localStorage.getItem(LANGUAGE_KEY);
+
+          const language =
+            storedLanguage === "en" || storedLanguage === "ar"
+              ? storedLanguage
+              : "ar";
+
+          localStorage.setItem(LANGUAGE_KEY, language);
+
+          root.lang = language;
+          root.dir = language === "ar" ? "rtl" : "ltr";
+        } catch {
+          /*
+           * Safe defaults if localStorage or matchMedia
+           * is unavailable.
+           */
+          document.documentElement.lang = "ar";
+          document.documentElement.dir = "rtl";
+        }
+      })();
+    </script>
+
+    <!-- ============================================
+         Page Title
+         ============================================ -->
+    <title>منصة تحكم المشرف | Tamam Fleet</title>
+  </head>
+
+  <body>
+    <!-- React Application -->
+    <div id="root"></div>
+
+    <!-- Application Entry -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,1220 @@
+import { Suspense, useState, useEffect, useRef, type ReactNode } from "react";
+import {
+  Outlet,
+  useLocation,
+  Navigate,
+  NavLink,
+  useNavigate,
+} from "react-router-dom";
+import { useAuth } from "@app/providers/AuthProvider";
+import { useTheme } from "@app/providers/ThemeProvider";
+import { useLanguage } from "@shared/hooks/useLanguage";
+import { LanguageSwitcher } from "@shared/components/LanguageSwitcher";
+import { PageLoader } from "@shared/components/PageLoader";
+import { useToast } from "@shared/components/Toaster";
+import { cn } from "@shared/utils/cn";
+import { getRelativeTime } from "@shared/utils/formatters";
+import {
+  useNotifications,
+  useUnreadCount,
+  useMarkAsRead,
+} from "@/shared/hooks/useFleetNotifications";
+import { useDriverRequests } from "@/shared/hooks/useFleetRequests";
+
+/**
+ * FleetLayout — Dashboard Layout
+ */
+
+// ============================================
+// Types
+// ============================================
+
+interface NavItem {
+  to: string;
+  labelAr: string;
+  labelEn: string;
+  icon: ReactNode;
+  badge?: number;
+  end?: boolean;
+}
+
+// ============================================
+// Icon helper
+// ============================================
+
+const Icon: React.FC<{ children: ReactNode; className?: string }> = ({
+  children,
+  className,
+}) => (
+  <svg
+    className={cn("w-5 h-5 flex-shrink-0", className)}
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+  >
+    {children}
+  </svg>
+);
+
+// ============================================
+// Navigation Items
+// ============================================
+
+const mainNavItems: NavItem[] = [
+  {
+    to: "/dashboard",
+    labelAr: "لوحة التحكم",
+    labelEn: "Dashboard",
+    end: true,
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+        />
+      </Icon>
+    ),
+  },
+  {
+    to: "/dashboard/orders",
+    labelAr: "الطلبات",
+    labelEn: "Orders",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M15.75 10.5V6a3.75 3.75 0 1 0-7.5 0v4.5m11.356-1.993 1.263 12c.07.665-.45 1.243-1.119 1.243H4.25a1.125 1.125 0 0 1-1.12-1.243l1.264-12A1.125 1.125 0 0 1 5.513 7.5h12.974c.576 0 1.059.435 1.119 1.007Z"
+        />
+      </Icon>
+    ),
+  },
+  {
+    to: "/dashboard/drivers",
+    labelAr: "السائقين",
+    labelEn: "Drivers",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+        />
+      </Icon>
+    ),
+  },
+  {
+    to: "/dashboard/drivers/new",
+    labelAr: "إضافة سائق",
+    labelEn: "Add Driver",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"
+        />
+      </Icon>
+    ),
+  },
+
+  {
+    to: "/dashboard/requests",
+    labelAr: "طلبات الانضمام",
+    labelEn: "Requests",
+    badge: 5,
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z"
+        />
+      </Icon>
+    ),
+  },
+  {
+    to: "/dashboard/wallet",
+    labelAr: "المحفظة",
+    labelEn: "Wallet",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
+        />
+      </Icon>
+    ),
+  },
+  {
+    to: "/dashboard/support",
+    labelAr: "الدعم الفنى",
+    labelEn: "Technical Support",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.25 21a5.972 5.972 0 0 1-2.25-3.903A7.5 7.5 0 0 1 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"
+        />
+      </Icon>
+    ),
+  },
+];
+
+const bottomNavItems: NavItem[] = [
+  {
+    to: "/dashboard/notifications",
+    labelAr: "الإشعارات",
+    labelEn: "Notifications",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
+        />
+      </Icon>
+    ),
+  },
+  {
+    to: "/dashboard/reports",
+    labelAr: "التقارير",
+    labelEn: "Reports",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"
+        />
+      </Icon>
+    ),
+  },
+  {
+    to: "/dashboard/settings",
+    labelAr: "الإعدادات",
+    labelEn: "Settings",
+    icon: (
+      <Icon>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+        />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+        />
+      </Icon>
+    ),
+  },
+];
+
+// ============================================
+// Sidebar
+// ============================================
+
+interface SidebarProps {
+  collapsed: boolean;
+  setCollapsed: (collapsed: boolean) => void;
+  mobileOpen: boolean;
+  setMobileOpen: (open: boolean) => void;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({
+  collapsed,
+  setCollapsed,
+  mobileOpen,
+  setMobileOpen,
+}) => {
+  const { currentLanguage } = useLanguage();
+  const location = useLocation();
+  const { user } = useAuth();
+  const isAr = currentLanguage === "ar";
+
+  // ------------------------------------------------------------------
+  // Fetch real-time counts for badges
+  // ------------------------------------------------------------------
+  const { data: unreadData } = useUnreadCount();
+  const unreadCount = unreadData?.count ?? 0;
+
+  const { pendingRequests } = useDriverRequests();
+  const pendingRequestsCount = pendingRequests.length;
+
+  // Dynamic badges
+  const mainNavItemsWithBadge = mainNavItems.map((item) => {
+    if (item.to === "/dashboard/requests") {
+      return {
+        ...item,
+        badge: pendingRequestsCount > 0 ? pendingRequestsCount : undefined,
+      };
+    }
+    return item;
+  });
+
+  const bottomNavItemsWithBadge = bottomNavItems.map((item) => {
+    if (item.to === "/dashboard/notifications") {
+      return { ...item, badge: unreadCount > 0 ? unreadCount : undefined };
+    }
+    return item;
+  });
+
+  const supervisorName = user?.fullName || (isAr ? "المشرف" : "Supervisor");
+  const supervisorInitial = supervisorName?.charAt(0) || "م";
+
+  // Detect mobile
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname, setMobileOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "b") {
+        e.preventDefault();
+        setCollapsed(!collapsed);
+      }
+      if (e.key === "Escape" && mobileOpen) setMobileOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [collapsed, mobileOpen, setCollapsed, setMobileOpen]);
+
+  useEffect(() => {
+    document.body.style.overflow = mobileOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileOpen]);
+
+  const getLabel = (item: NavItem) => (isAr ? item.labelAr : item.labelEn);
+
+  const handleLogoClick = () => {
+    if (isMobile) {
+      setMobileOpen(false);
+    } else {
+      setCollapsed(!collapsed);
+    }
+  };
+
+  return (
+    <>
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 lg:hidden bg-black/50 backdrop-blur-sm animate-fade-in"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={cn(
+          "fixed top-0 h-full z-50 flex flex-col",
+          "bg-surface-50/90 dark:bg-surface-950/90 backdrop-blur-xl backdrop-saturate-150",
+          "border-e border-surface-200/50 dark:border-surface-800/50",
+          "transition-all duration-300 ease-out-expo shadow-glass-sm",
+          isAr ? "right-0" : "left-0",
+          mobileOpen ? "w-full" : collapsed ? "w-[72px]" : "w-64",
+          mobileOpen
+            ? "translate-x-0"
+            : cn(
+                isAr
+                  ? "translate-x-full lg:translate-x-0"
+                  : "-translate-x-full lg:translate-x-0",
+              ),
+          mobileOpen && "shadow-2xl lg:shadow-none",
+        )}
+        aria-label={isAr ? "القائمة الجانبية" : "Sidebar navigation"}
+      >
+        {/* Logo Section */}
+        <div
+          className={cn(
+            "h-16 flex items-center border-b border-surface-200/50 dark:border-surface-800/50 flex-shrink-0 transition-all duration-300",
+            collapsed && !mobileOpen
+              ? "lg:justify-center lg:px-0 px-3"
+              : "justify-between px-5",
+          )}
+        >
+          {collapsed && !mobileOpen ? (
+            <button
+              onClick={handleLogoClick}
+              className="hidden lg:flex w-12 h-12 items-center justify-center rounded-xl hover:bg-surface-100 dark:hover:bg-surface-800 active:scale-95 transition-all"
+              aria-label={isAr ? "توسيع القائمة" : "Expand sidebar"}
+            >
+              <img
+                src="/icon.svg"
+                alt="Tamam Fleet Logo"
+                className="w-8 h-8 rounded-lg object-cover transition-transform duration-300 hover:scale-110"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "/icon.svg";
+                }}
+              />
+            </button>
+          ) : (
+            <>
+              <NavLink
+                to="/dashboard"
+                onClick={() => isMobile && setMobileOpen(false)}
+                className="flex items-center gap-3 group min-w-0 flex-1"
+              >
+                <img
+                  src="/icon.svg"
+                  alt="Tamam Fleet Logo"
+                  className="w-8 h-8 rounded-lg object-cover transition-transform duration-300 group-hover:scale-110 flex-shrink-0"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "/icon.svg";
+                  }}
+                />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-lg font-bold text-surface-900 dark:text-surface-100 leading-tight truncate">
+                    {isAr ? "تطبيق تمام" : "Tamam App"}
+                  </span>
+                  <span className="text-[10px] text-surface-500 dark:text-surface-400 -mt-0.5">
+                    {isAr ? "منصة تحكم الأسطول" : "Fleet Management Platform"}
+                  </span>
+                </div>
+              </NavLink>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setCollapsed(true)}
+                  className="hidden lg:flex p-2 rounded-xl text-surface-400 hover:text-surface-600 dark:text-surface-500 dark:hover:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 active:scale-95"
+                  aria-label={isAr ? "طي القائمة" : "Collapse"}
+                >
+                  <svg
+                    className={cn("w-5 h-5", isAr && "scale-x-[-1]")}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5"
+                    />
+                  </svg>
+                </button>
+
+                <button
+                  onClick={() => setMobileOpen(false)}
+                  className="lg:hidden p-2 rounded-xl text-surface-400 hover:text-surface-600 dark:text-surface-500 dark:hover:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 active:scale-95"
+                  aria-label={isAr ? "إغلاق" : "Close"}
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18 18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Navigation Section */}
+        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto overflow-x-hidden">
+          <p
+            className={cn(
+              "text-[11px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500 mb-2 px-3",
+              collapsed && !mobileOpen && "lg:hidden",
+            )}
+          >
+            {isAr ? "الرئيسية" : "Main"}
+          </p>
+          {mainNavItemsWithBadge.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => {
+                let isActiveRoute = isActive;
+                if (item.to === "/dashboard/drivers") {
+                  const currentPath = window.location.pathname;
+                  isActiveRoute =
+                    currentPath === "/dashboard/drivers" ||
+                    currentPath === "/dashboard/drivers/";
+                }
+                return cn(
+                  "flex items-center rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                  !(collapsed && !mobileOpen) && "gap-3 px-3 py-2.5 w-full",
+                  collapsed &&
+                    !mobileOpen &&
+                    "lg:w-12 lg:h-12 lg:p-0 lg:justify-center lg:mx-auto",
+                  isActiveRoute
+                    ? "bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300 shadow-sm"
+                    : "text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800/50 hover:text-surface-900 dark:hover:text-surface-200",
+                );
+              }}
+              title={collapsed && !mobileOpen ? getLabel(item) : undefined}
+            >
+              {({ isActive }) => {
+                let isActiveRoute = isActive;
+                if (item.to === "/dashboard/drivers") {
+                  const currentPath = window.location.pathname;
+                  isActiveRoute =
+                    currentPath === "/dashboard/drivers" ||
+                    currentPath === "/dashboard/drivers/";
+                }
+                return (
+                  <>
+                    {isActiveRoute && (
+                      <span
+                        className={cn(
+                          "absolute top-1/2 -translate-y-1/2 w-1 h-6 rounded-full bg-primary-600 dark:bg-primary-400 animate-scale-in",
+                          isAr
+                            ? "right-0 rounded-l-full"
+                            : "left-0 rounded-r-full",
+                          collapsed &&
+                            !mobileOpen &&
+                            (isAr ? "lg:-right-3" : "lg:-left-3"),
+                        )}
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span
+                      className="absolute inset-0 rounded-xl bg-primary-500/0 group-hover:bg-primary-500/5 dark:group-hover:bg-primary-400/5 transition-colors duration-300"
+                      aria-hidden="true"
+                    />
+                    <span className="relative z-10 flex-shrink-0">
+                      {item.icon}
+                    </span>
+                    <span
+                      className={cn(
+                        "truncate relative z-10 transition-all",
+                        collapsed && !mobileOpen ? "lg:hidden" : "flex-1",
+                      )}
+                    >
+                      {getLabel(item)}
+                    </span>
+                    {item.badge && (
+                      <span
+                        className={cn(
+                          "inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[10px] font-bold rounded-full relative z-10",
+                          isActiveRoute
+                            ? "bg-primary-200 dark:bg-primary-800 text-primary-700 dark:text-primary-300"
+                            : "bg-surface-200 dark:bg-surface-700 text-surface-600 dark:text-surface-300",
+                          collapsed && !mobileOpen && "lg:hidden",
+                        )}
+                      >
+                        {item.badge > 99 ? "99+" : item.badge}
+                      </span>
+                    )}
+                    {item.badge && collapsed && !mobileOpen && (
+                      <span
+                        className="hidden lg:block absolute top-2.5 end-2.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-surface-900 shadow-sm"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </>
+                );
+              }}
+            </NavLink>
+          ))}
+
+          {!(collapsed && !mobileOpen) && (
+            <div className="my-3 border-t border-surface-200 dark:border-surface-700" />
+          )}
+          <p
+            className={cn(
+              "text-[11px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500 mb-2 mt-6 px-3",
+              collapsed && !mobileOpen && "lg:hidden",
+            )}
+          >
+            {isAr ? "أخرى" : "Other"}
+          </p>
+          {bottomNavItemsWithBadge.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                  !(collapsed && !mobileOpen) && "gap-3 px-3 py-2.5 w-full",
+                  collapsed &&
+                    !mobileOpen &&
+                    "lg:w-12 lg:h-12 lg:p-0 lg:justify-center lg:mx-auto",
+                  isActive
+                    ? "bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300 shadow-sm"
+                    : "text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800/50 hover:text-surface-900 dark:hover:text-surface-200",
+                )
+              }
+              title={collapsed && !mobileOpen ? getLabel(item) : undefined}
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span
+                      className={cn(
+                        "absolute top-1/2 -translate-y-1/2 w-1 h-6 rounded-full bg-primary-600 dark:bg-primary-400 animate-scale-in",
+                        isAr
+                          ? "right-0 rounded-l-full"
+                          : "left-0 rounded-r-full",
+                        collapsed &&
+                          !mobileOpen &&
+                          (isAr ? "lg:-right-3" : "lg:-left-3"),
+                      )}
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span
+                    className="absolute inset-0 rounded-xl bg-primary-500/0 group-hover:bg-primary-500/5 dark:group-hover:bg-primary-400/5 transition-colors duration-300"
+                    aria-hidden="true"
+                  />
+                  <span className="relative z-10 flex-shrink-0">
+                    {item.icon}
+                  </span>
+                  <span
+                    className={cn(
+                      "truncate relative z-10 transition-all",
+                      collapsed && !mobileOpen ? "lg:hidden" : "flex-1",
+                    )}
+                  >
+                    {getLabel(item)}
+                  </span>
+                  {item.badge && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[10px] font-bold rounded-full relative z-10",
+                        isActive
+                          ? "bg-primary-200 dark:bg-primary-800 text-primary-700 dark:text-primary-300"
+                          : "bg-surface-200 dark:bg-surface-700 text-surface-600 dark:text-surface-300",
+                        collapsed && !mobileOpen && "lg:hidden",
+                      )}
+                    >
+                      {item.badge > 99 ? "99+" : item.badge}
+                    </span>
+                  )}
+                  {item.badge && collapsed && !mobileOpen && (
+                    <span
+                      className="hidden lg:block absolute top-2.5 end-2.5 w-2 h-2 rounded-full bg-error-500 ring-2 ring-white dark:ring-surface-900 shadow-sm"
+                      aria-hidden="true"
+                    />
+                  )}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </nav>
+
+        {/* User Footer Section */}
+        <div
+          className={cn(
+            "p-3 border-t border-surface-200/50 dark:border-surface-800/50 flex-shrink-0 transition-all duration-300",
+            collapsed && !mobileOpen ? "lg:flex lg:justify-center lg:p-3" : "",
+          )}
+        >
+          {collapsed && !mobileOpen ? (
+            <div className="hidden lg:flex w-12 h-12 items-center justify-center rounded-xl hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors cursor-pointer group">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20 group-active:scale-95 transition-transform">
+                <span className="text-sm font-bold text-white">
+                  {supervisorInitial}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/20">
+                <span className="text-sm font-bold text-white">
+                  {supervisorInitial}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+                  {supervisorName}
+                </p>
+                <p className="text-xs text-surface-500 dark:text-surface-400 truncate">
+                  {isAr ? "مشرف الأسطول" : "Fleet Supervisor"}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+};
+
+// ============================================
+// Navbar
+// ============================================
+
+interface NavbarProps {
+  onMenuClick: () => void;
+}
+
+const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
+  const { resolvedTheme, toggleTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const { user, logout } = useAuth();
+  const { currentLanguage } = useLanguage();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const isAr = currentLanguage === "ar";
+
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const notificationsRef = useRef<HTMLDivElement>(null);
+
+  const { data: notificationsData } = useNotifications(1, 5);
+  const { data: unreadData } = useUnreadCount();
+  const markAsRead = useMarkAsRead();
+  const notifications = notificationsData ?? [];
+  const unreadCount = unreadData?.count ?? 0;
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(e.target as HTMLElement)
+      )
+        setUserMenuOpen(false);
+      if (
+        notificationsRef.current &&
+        !notificationsRef.current.contains(e.target as HTMLElement)
+      )
+        setNotificationsOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleLogout = () => {
+    logout();
+    toast.success(isAr ? "تم تسجيل الخروج بنجاح" : "Logged out successfully");
+    navigate("/auth/login");
+  };
+
+  return (
+    <header
+      className={cn(
+        "h-16 sticky top-0 z-30 bg-surface-50/80 dark:bg-surface-950/80 backdrop-blur-xl backdrop-saturate-150",
+        "border-b border-surface-200/50 dark:border-surface-800/50",
+        "flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-4 lg:px-6 transition-all duration-300",
+      )}
+    >
+      {/* Left section */}
+      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+        <button
+          onClick={onMenuClick}
+          className="lg:hidden p-2 rounded-xl text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 active:scale-95 flex-shrink-0"
+          aria-label={isAr ? "فتح القائمة" : "Open menu"}
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+            />
+          </svg>
+        </button>
+
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <svg
+            className={cn(
+              "absolute top-1/2 -translate-y-1/2 w-4 h-4 transition-colors",
+              isAr ? "right-3" : "left-3",
+              searchFocused
+                ? "text-primary-500"
+                : "text-surface-400 dark:text-surface-500",
+            )}
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+            />
+          </svg>
+          <input
+            data-search
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            placeholder={
+              isAr ? "بحث عن سائق أو مركبة..." : "Search drivers or vehicles..."
+            }
+            className={cn(
+              "w-full rounded-xl py-2 bg-surface-100 dark:bg-surface-800 text-sm",
+              "text-surface-900 dark:text-surface-100 placeholder:text-surface-400 dark:placeholder:text-surface-500",
+              "border-2 border-transparent focus:outline-none focus:border-primary-500/50 focus:bg-surface-50 dark:focus:bg-surface-800/50",
+              "transition-all duration-200",
+              isAr ? "pr-10 pl-4 sm:pl-16" : "pl-10 pr-4 sm:pr-16",
+            )}
+          />
+          <kbd
+            className={cn(
+              "absolute top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-surface-400 dark:text-surface-500 bg-surface-200 dark:bg-surface-700 rounded-md pointer-events-none select-none",
+              isAr ? "left-3" : "right-3",
+            )}
+          >
+            <span className="text-xs">⌘</span>K
+          </kbd>
+        </div>
+      </div>
+
+      {/* Right section */}
+      <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+        <LanguageSwitcher variant="minimal" className="sm:hidden" />
+        <LanguageSwitcher variant="navbar" className="hidden sm:flex" />
+
+        {/* Theme Toggle */}
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-xl text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 active:scale-95 transition-all duration-200"
+          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {isDark ? (
+            <svg
+              className="w-5 h-5 text-warning-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
+              />
+            </svg>
+          ) : (
+            <svg
+              className="w-5 h-5 text-surface-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"
+              />
+            </svg>
+          )}
+        </button>
+
+        {/* Notifications */}
+        <div className="relative" ref={notificationsRef}>
+          <button
+            onClick={() => {
+              setNotificationsOpen(!notificationsOpen);
+              setUserMenuOpen(false);
+            }}
+            className={cn(
+              "p-2 rounded-xl transition-all duration-200 relative",
+              "text-surface-600 dark:text-surface-400",
+              "hover:bg-surface-100 dark:hover:bg-surface-800",
+              "active:scale-95",
+              notificationsOpen && "bg-surface-100 dark:bg-surface-800",
+            )}
+            aria-label={isAr ? "الإشعارات" : "Notifications"}
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
+              />
+            </svg>
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 end-1.5 w-2 h-2 rounded-full bg-error-500 ring-2 ring-white dark:ring-surface-900 shadow-sm" />
+            )}
+          </button>
+
+          {notificationsOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40 sm:hidden bg-black/20 backdrop-blur-sm animate-fade-in"
+                onClick={() => setNotificationsOpen(false)}
+                aria-hidden="true"
+              />
+              <div
+                className={cn(
+                  "fixed z-50",
+                  "top-16 inset-x-4",
+                  "max-w-md mx-auto",
+                  "rounded-2xl overflow-hidden",
+                  "animate-fade-in-scale origin-top",
+                  "glass glass-elevated",
+                  "sm:absolute sm:inset-x-auto sm:top-full sm:mt-2 sm:mx-0",
+                  "sm:w-80 md:w-96",
+                  "sm:max-w-none sm:max-h-[32rem]",
+                  "sm:rounded-2xl",
+                  isAr ? "sm:left-0" : "sm:right-0",
+                )}
+                style={{
+                  maxHeight: "calc(100vh - 5rem)",
+                }}
+              >
+                <div className="px-4 py-3 border-b border-surface-200/50 dark:border-surface-800/50 flex justify-between items-center sticky top-0 bg-surface-50/95 dark:bg-surface-950/95 backdrop-blur-xl z-10">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-surface-900 dark:text-surface-100">
+                      {isAr ? "الإشعارات" : "Notifications"}
+                    </h3>
+                    {unreadCount > 0 && (
+                      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[10px] font-bold rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setNotificationsOpen(false)}
+                    className="p-1.5 rounded-lg text-surface-400 hover:text-surface-600 dark:text-surface-500 dark:hover:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                    aria-label={isAr ? "إغلاق" : "Close"}
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M6 18 18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <div
+                  className="overflow-y-auto overscroll-contain"
+                  style={{ maxHeight: "calc(100vh - 12rem)" }}
+                >
+                  {notifications.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                      <div className="w-14 h-14 rounded-2xl bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-4">
+                        <svg
+                          className="w-7 h-7 text-surface-300 dark:text-surface-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={1}
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
+                          />
+                        </svg>
+                      </div>
+                      <p className="text-sm font-medium text-surface-500 dark:text-surface-400">
+                        {isAr ? "لا توجد إشعارات" : "No notifications"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-surface-100 dark:divide-surface-800/30">
+                      {notifications.slice(0, 5).map((n) => (
+                        <button
+                          key={n.id}
+                          onClick={() => {
+                            if (!n.isRead) markAsRead.mutate(n.id);
+                            if (n.link) navigate(n.link);
+                            setNotificationsOpen(false);
+                          }}
+                          className={cn(
+                            "w-full text-start px-4 py-3 flex items-start gap-3 transition-colors",
+                            "hover:bg-surface-50 dark:hover:bg-surface-800/30",
+                            !n.isRead &&
+                              "bg-primary-50/40 dark:bg-primary-950/15",
+                            !n.isRead &&
+                              "border-s-2 border-primary-500 dark:border-primary-400",
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0",
+                              n.isRead
+                                ? "bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400"
+                                : "bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400",
+                            )}
+                          >
+                            <svg
+                              className="w-4.5 h-4.5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              strokeWidth={1.5}
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"
+                              />
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <p
+                                className={cn(
+                                  "text-sm truncate",
+                                  n.isRead
+                                    ? "font-medium text-surface-700 dark:text-surface-300"
+                                    : "font-semibold text-surface-900 dark:text-surface-100",
+                                )}
+                              >
+                                {n.title}
+                              </p>
+                              {!n.isRead && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-primary-500 flex-shrink-0 mt-1.5 shadow-[0_0_6px_rgba(59,130,246,0.4)]" />
+                              )}
+                            </div>
+                            <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5 line-clamp-2 leading-relaxed">
+                              {n.body}
+                            </p>
+                            <p className="text-[10px] text-surface-400 dark:text-surface-500 mt-1.5 font-medium">
+                              {getRelativeTime(n.createdAt)}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {notifications.length > 0 && (
+                  <div className="p-2 border-t border-surface-200/50 dark:border-surface-800/50 sticky bottom-0 bg-surface-50/95 dark:bg-surface-950/95 backdrop-blur-xl">
+                    <NavLink
+                      to="/dashboard/notifications"
+                      onClick={() => setNotificationsOpen(false)}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-950/30 transition-colors"
+                    >
+                      {isAr ? "عرض جميع الإشعارات" : "View all notifications"}
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d={
+                            isAr
+                              ? "M15.75 19.5 8.25 12l7.5-7.5"
+                              : "m8.25 4.5 7.5 7.5-7.5 7.5"
+                          }
+                        />
+                      </svg>
+                    </NavLink>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* User Menu */}
+        <div className="relative" ref={userMenuRef}>
+          <button
+            onClick={() => {
+              setUserMenuOpen(!userMenuOpen);
+              setNotificationsOpen(false);
+            }}
+            className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-surface-100 dark:hover:bg-surface-800 active:scale-95 transition-all duration-200"
+          >
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20">
+              <span className="text-sm font-bold text-white">
+                {user?.fullName?.charAt(0) || (isAr ? "م" : "S")}
+              </span>
+            </div>
+          </button>
+          {userMenuOpen && (
+            <div
+              className={cn(
+                "absolute top-full mt-2 w-56 rounded-2xl overflow-hidden animate-fade-in-scale origin-top-right glass glass-elevated",
+                isAr ? "left-0" : "right-0",
+              )}
+            >
+              <div className="p-4 border-b border-surface-200/50 dark:border-surface-800/50">
+                <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                  {user?.fullName || (isAr ? "المشرف" : "Supervisor")}
+                </p>
+                <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
+                  {user?.phoneNumber || ""}
+                </p>
+              </div>
+              <div className="p-2">
+                <NavLink
+                  to="/dashboard/settings"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+                    />
+                  </svg>
+                  {isAr ? "الإعدادات" : "Settings"}
+                </NavLink>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-950/30 transition-colors"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
+                    />
+                  </svg>
+                  {isAr ? "تسجيل الخروج" : "Sign out"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+};
+
+// ============================================
+// FleetLayout — Main Export
+// ============================================
+
+export const FleetLayout: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+  const { currentLanguage } = useLanguage();
+  const isAr = currentLanguage === "ar";
+
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("fleet-sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("fleet-sidebar-collapsed", String(collapsed));
+    } catch {}
+  }, [collapsed]);
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) setMobileOpen(false);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  if (isLoading)
+    return (
+      <PageLoader
+        message={isAr ? "جاري التحقق من الجلسة..." : "Verifying session..."}
+      />
+    );
+  if (!isAuthenticated) return <Navigate to="/auth/login" replace />;
+
+  return (
+    <div
+      className="h-screen flex bg-surface-50 dark:bg-surface-950"
+      dir={isAr ? "rtl" : "ltr"}
+    >
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only absolute top-4 start-4 z-[60] px-4 py-2 rounded-xl bg-primary-600 text-white shadow-lg"
+      >
+        {isAr ? "تخطي إلى المحتوى الرئيسي" : "Skip to main content"}
+      </a>
+      <Sidebar
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        mobileOpen={mobileOpen}
+        setMobileOpen={setMobileOpen}
+      />
+      <div
+        className={cn(
+          "flex-1 flex flex-col min-h-screen transition-all duration-300",
+          collapsed ? "lg:ms-[72px]" : "lg:ms-64",
+        )}
+      >
+        <Navbar onMenuClick={() => setMobileOpen(true)} />
+        <main id="main-content" className="flex-1 overflow-y-auto">
+          <div className="p-3 sm:p-5 lg:p-8 max-w-[1600px] mx-auto">
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center min-h-[400px]">
+                  <PageLoader
+                    variant="inline"
+                    message={
+                      isAr ? "جاري تحميل المحتوى..." : "Loading content..."
+                    }
+                  />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};
+
+export default FleetLayout;
