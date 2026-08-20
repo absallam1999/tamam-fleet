@@ -97,8 +97,9 @@ export default defineConfig({
           if (id.includes('src/features/auth')) return 'feature-auth';
           if (id.includes('src/features/dashboard')) return 'feature-dashboard';
           if (id.includes('src/features/orders')) return 'feature-orders';
-          if (id.includes('src/features/menu')) return 'feature-menu';
-          if (id.includes('src/features/customers')) return 'feature-customers';
+          if (id.includes('src/features/support')) return 'feature-support';
+          if (id.includes('src/features/drivers')) return 'feature-drivers';
+          if (id.includes('src/features/requests')) return 'feature-requests';
           if (id.includes('src/features/settings')) return 'feature-settings';
         },
       },
