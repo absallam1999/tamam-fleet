@@ -11,6 +11,7 @@ import { useAuth } from "@/app/providers/AuthProvider";
 import { apiClient } from "@/lib/api-client";
 import { ENDPOINTS } from "@/config/api";
 import type {
+  DashboardAreaDto,
   SupervisorDashboardDto,
   SupervisorWalletDto,
 } from "@shared/types";
@@ -38,6 +39,7 @@ export interface DashboardStats {
 interface FleetContextValue {
   supervisor: SupervisorInfo | null;
   stats: DashboardStats | null;
+  areas: DashboardAreaDto[] | null;
   isLoading: boolean;
   isActive: boolean;
   refreshDashboard: () => Promise<void>;
@@ -74,6 +76,7 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
 
   const [supervisor, setSupervisor] = useState<SupervisorInfo | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [areas, setAreas] = useState<DashboardAreaDto[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,7 +105,7 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
   }, [user]);
 
   // ============================================================
-  // Fetch Dashboard Stats and Wallet
+  // Fetch Dashboard Stats, Areas, and Wallet
   // ============================================================
   const fetchDashboard = useCallback(async (): Promise<void> => {
     setError(null);
@@ -112,12 +115,12 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
         apiClient.get<SupervisorWalletDto>(ENDPOINTS.SUPERVISOR.WALLET),
       ]);
 
-      // Process dashboard stats
+      // Process dashboard stats and areas
       if (dashboardResult.status === "fulfilled") {
-        const envelope = dashboardResult.value.data; // full response body (envelope)
+        const envelope = dashboardResult.value.data;
         const dashboardData = extractApiData<SupervisorDashboardDto>(envelope);
-        console.log("Dashboard API raw data:", dashboardData);
 
+        // Set stats
         setStats({
           totalDrivers: Number(dashboardData?.totalDrivers) || 0,
           onlineDrivers: Number(dashboardData?.onlineDrivers) || 0,
@@ -125,6 +128,9 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
           activeDeliveries: Number(dashboardData?.activeDeliveries) || 0,
           completedToday: Number(dashboardData?.completedToday) || 0,
         });
+
+        // Set areas
+        setAreas(dashboardData?.areas ?? []);
       } else {
         console.error("Dashboard fetch failed:", dashboardResult.reason);
         setStats({
@@ -134,6 +140,7 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
           activeDeliveries: 0,
           completedToday: 0,
         });
+        setAreas(null);
         setError("Failed to load dashboard statistics");
       }
 
@@ -184,6 +191,7 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
     } else {
       setSupervisor(null);
       setStats(null);
+      setAreas(null);
       setIsLoading(false);
     }
   }, [isAuthenticated, fetchDashboard]);
@@ -195,6 +203,7 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
     () => ({
       supervisor,
       stats,
+      areas,
       isLoading,
       isActive,
       refreshDashboard,
@@ -204,6 +213,7 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
     [
       supervisor,
       stats,
+      areas,
       isLoading,
       isActive,
       refreshDashboard,

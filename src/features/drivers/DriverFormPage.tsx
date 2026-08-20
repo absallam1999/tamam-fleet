@@ -217,15 +217,19 @@ export const DriverFormPage: React.FC = () => {
         vehicleType: form.vehicleType || undefined,
         vehiclePlateNumber: form.vehiclePlateNumber.trim() || undefined,
       };
-      updateDriver.mutate(dto, {
-        onSuccess: () => {
-          toast.success(lang(t.saveSuccess));
-          navigate(`/dashboard/drivers/${driverId}`);
+
+      updateDriver.mutate(
+        { driverId, dto },
+        {
+          onSuccess: () => {
+            toast.success(lang(t.saveSuccess));
+            navigate(`/dashboard/drivers/${driverId}`);
+          },
+          onError: (err: Error) => {
+            toast.error(lang(t.saveError), { description: err.message });
+          },
         },
-        onError: (err: Error) => {
-          toast.error(lang(t.saveError), { description: err.message });
-        },
-      });
+      );
     } else {
       const dto: SupervisorCreateDriverDto = {
         fullName: form.fullName.trim(),

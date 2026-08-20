@@ -39,14 +39,41 @@ function extractApiData<T>(responseData: unknown): T {
  * API returns `driverId` instead of `id`.
  */
 function mapDriver(driver: any): DriverDto {
+  const isOnline = Boolean(driver.isOnline);
+  const activeOrderId = driver.activeOrderId;
+  const activeOrderStatus = driver.activeOrderStatus;
+
+  // Derive status:
+  // - if activeOrderId exists and activeOrderStatus is something other than delivered → "on_trip"
+  // - else if isOnline → "available"
+  // - else → "off_duty"
+  let status: DriverStatus = isOnline ? "available" : "off_duty";
+  if (
+    activeOrderId &&
+    activeOrderStatus &&
+    activeOrderStatus.toLowerCase() !== "delivered"
+  ) {
+    status = "on_trip";
+  }
+
   return {
     ...driver,
     id: driver.driverId,
+    status,
+    totalTrips: driver.totalDeliveries ?? driver.totalTrips ?? 0,
+    completedTrips: driver.todayDeliveries ?? driver.completedTrips ?? 0,
+    onTimePercentage: driver.onTimePercentage ?? 0,
+    lastActiveDate:
+      driver.lastLocationUpdateAt ?? driver.lastActiveDate ?? undefined,
+    joinedDate: driver.joinedDate ?? undefined,
+    vehicleType: driver.vehicleType ?? undefined,
+    vehiclePlateNumber: driver.vehiclePlateNumber ?? undefined,
+    email: driver.email ?? undefined,
   };
 }
 
 // ============================================
-// Update DTO (new endpoint)
+// Update DTO
 // ============================================
 
 export interface SupervisorUpdateDriverDto {
@@ -94,8 +121,14 @@ export function useUpdateDriver() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (dto: SupervisorUpdateDriverDto) => {
-      await apiClient.put(ENDPOINTS.SUPERVISOR.UPDATE_DRIVER, dto);
+    mutationFn: async ({
+      driverId,
+      dto,
+    }: {
+      driverId: string;
+      dto: SupervisorUpdateDriverDto;
+    }) => {
+      await apiClient.put(ENDPOINTS.SUPERVISOR.UPDATE_DRIVER(driverId), dto);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [DRIVERS_KEY] });

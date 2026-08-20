@@ -29,6 +29,13 @@ const t = {
   completedToday: { ar: "اكتملت اليوم", en: "Completed Today" },
   needReview: { ar: "تحتاج مراجعة", en: "Need Review" },
 
+  // Areas
+  areasOverview: { ar: "المناطق", en: "Areas" },
+  drivers: { ar: "السائقين", en: "Drivers" },
+  pendingInArea: { ar: "معلق", en: "Pending" },
+  activeInArea: { ar: "نشط", en: "Active" },
+  noAreas: { ar: "لا توجد مناطق", en: "No areas" },
+
   // Recent orders
   recentOrders: { ar: "آخر الطلبات", en: "Recent Orders" },
   viewAll: { ar: "عرض الكل", en: "View All" },
@@ -149,7 +156,7 @@ const getDriverStatusConfig = (isAr: boolean) => ({
 export const DashboardHome: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { stats: fleetStats } = useFleet();
+  const { stats: fleetStats, areas } = useFleet();
   const { currentLanguage } = useLanguage();
 
   const isAr = currentLanguage === "ar";
@@ -389,6 +396,71 @@ export const DashboardHome: React.FC = () => {
         ))}
       </div>
 
+      {/* Areas Overview */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-lg font-semibold text-surface-900 dark:text-surface-100 flex items-center gap-2">
+            <svg
+              className="w-5 h-5 text-primary-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"
+              />
+            </svg>
+            {lang(t.areasOverview)}
+          </h3>
+          <span className="text-sm text-surface-500 dark:text-surface-400">
+            ({areas?.length ?? 0})
+          </span>
+        </div>
+
+        {areas && areas.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {areas.map((area) => (
+              <div
+                key={area.areaId}
+                className="bg-white dark:bg-surface-900 rounded-2xl border border-surface-200 dark:border-surface-800 p-5 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-base font-semibold text-surface-900 dark:text-surface-100">
+                    {area.areaName}
+                  </h3>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-primary-50 dark:bg-primary-500/10 text-primary-700 dark:text-primary-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
+                    {area.driverCount} {lang(t.drivers)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="flex items-center gap-1.5 text-warning-600 dark:text-warning-400">
+                    <span className="w-2 h-2 rounded-full bg-warning-500" />
+                    {area.pendingOrders ?? 0} {lang(t.pendingInArea)}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-info-600 dark:text-info-400">
+                    <span className="w-2 h-2 rounded-full bg-info-500" />
+                    {area.activeOrders ?? 0} {lang(t.activeInArea)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="glass p-5 text-center text-sm text-surface-500">
+            {lang(t.noAreas)}
+          </div>
+        )}
+      </div>
+
       {/* Bottom Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Driver Overview */}
@@ -484,7 +556,7 @@ export const DashboardHome: React.FC = () => {
                       </p>
                     </div>
                     <svg
-                      className="w-4 h-4 text-surface-300 dark:text-surface-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="w-4 h-4 text-surface-300 dark:text-surface-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 rtl:rotate-180"
                       fill="none"
                       viewBox="0 0 24 24"
                       strokeWidth={2}

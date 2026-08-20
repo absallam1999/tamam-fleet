@@ -31,7 +31,8 @@ export const ENDPOINTS = {
     TOGGLE_DRIVER_AVAILABILITY: (driverId: string) =>
       `/api/supervisor/drivers/${driverId}/toggle-availability`,
     CREATE_DRIVER: "/api/supervisor/create-driver",
-    UPDATE_DRIVER: "/api/supervisor/update-driver",
+    UPDATE_DRIVER: (driverId: string) =>
+      `/api/supervisor/update-driver/${driverId}`,
 
     // ==========================================
     // Order Management

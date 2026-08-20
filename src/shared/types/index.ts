@@ -196,6 +196,8 @@ export interface DashboardAreaDto {
   areaId: string;
   areaName: string;
   driverCount: number;
+  pendingOrders?: number;
+  activeOrders?: number;
 }
 
 // ---------- Supervisor Wallet ----------

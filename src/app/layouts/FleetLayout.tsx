@@ -19,6 +19,7 @@ import {
   useUnreadCount,
   useMarkAsRead,
 } from "@/shared/hooks/useFleetNotifications";
+import { useFleetOrders } from "@/shared/hooks/useFleetOrders";
 import { useDriverRequests } from "@/shared/hooks/useFleetRequests";
 
 /**
@@ -124,7 +125,6 @@ const mainNavItems: NavItem[] = [
     to: "/dashboard/requests",
     labelAr: "طلبات الانضمام",
     labelEn: "Requests",
-    badge: 5,
     icon: (
       <Icon>
         <path
@@ -243,6 +243,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   const { data: unreadData } = useUnreadCount();
   const unreadCount = unreadData?.count ?? 0;
 
+  const { pendingOrders } = useFleetOrders();
+  const ordersCount = pendingOrders.length;
+
   const { pendingRequests } = useDriverRequests();
   const pendingRequestsCount = pendingRequests.length;
 
@@ -252,6 +255,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       return {
         ...item,
         badge: pendingRequestsCount > 0 ? pendingRequestsCount : undefined,
+      };
+    }
+    if (item.to === "/dashboard/orders") {
+      return {
+        ...item,
+        badge: ordersCount > 0 ? ordersCount : undefined,
       };
     }
     return item;
