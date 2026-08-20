@@ -145,7 +145,9 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
 
         if (walletData) {
           setSupervisor((prev) =>
-            prev ? { ...prev, walletBalance: walletData.balance || 0 } : null,
+            prev
+              ? { ...prev, walletBalance: walletData.walletBalance || 0 }
+              : null,
           );
         }
       } else {
