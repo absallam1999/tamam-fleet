@@ -961,7 +961,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
                           key={n.id}
                           onClick={() => {
                             if (!n.isRead) markAsRead.mutate(n.id);
-                            if (n.link) navigate(n.link);
+                            navigate("/dashboard/notifications");
                             setNotificationsOpen(false);
                           }}
                           className={cn(
