@@ -8,7 +8,7 @@ import { PageLoader } from "@shared/components/PageLoader";
 import { cn } from "@shared/utils/cn";
 
 /**
- * AuthLayout — Premium Bilingual
+ * AuthLayout
  */
 
 // ============================================
@@ -476,7 +476,7 @@ const AuthFooter: React.FC<{ isAr: boolean }> = ({ isAr }) => {
   return (
     <div className="mt-6 text-center space-y-3">
       <a
-        href="https://tamaam.cloud/contact"
+        href="https://tamamapp.net/contact"
         target="_blank"
         rel="noopener noreferrer"
         className={cn(

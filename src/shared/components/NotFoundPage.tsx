@@ -3,10 +3,6 @@ import { useLanguage } from "@/shared/hooks/useLanguage";
 import { useTheme } from "@app/providers/ThemeProvider";
 import { cn } from "@shared/utils/cn";
 
-/**
- * NotFoundPage — Premium Bilingual 404 Error Page
- */
-
 // ============================================
 // Translations
 // ============================================
@@ -386,7 +382,7 @@ export const NotFoundPage: React.FC = () => {
           </div>
           <div className="text-center">
             <a
-              href="https://tamaam.cloud/contact"
+              href="https://tamamapp.net/contact"
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
