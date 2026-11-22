@@ -1,185 +1,388 @@
-import { apiClient } from "@/lib/api-client";
-import { ENDPOINTS } from "@/config/api";
-import type {
-  SupervisorDashboardDto,
-  SupervisorWalletDto,
-  DriverDto,
-  SupervisorCreateDriverDto,
-  SupervisorOrderDto,
-  AssignOrderDto,
-  ReassignOrderDto,
-  DriverRequestDto,
-  DriverFilterParams,
-  OrderFilterParams,
-  DriverRequestFilterParams,
-  PaginatedResponse,
-  CreateWithdrawalDto,
-} from "@shared/types";
+// ============================================================
+// Tamam Fleet Dashboard — Types
+// ============================================================
 
-/**
- * Converts a params object to a Record<string, string> for query strings.
- * Values that are undefined or null are omitted.
- */
-function toQueryParams<T extends object>(params?: T): Record<string, string> {
-  if (!params) return {};
+// ---------- Envelope + pagination ----------
 
-  return Object.entries(params).reduce<Record<string, string>>(
-    (acc, [key, value]) => {
-      if (value !== undefined && value !== null) {
-        acc[key] = String(value);
-      }
-      return acc;
-    },
-    {},
-  );
+export interface ApiEnvelope<T> {
+  success: boolean;
+  message: string | null;
+  data: T;
+  errors: string[];
 }
 
-/**
- * Helper to unwrap ApiResponse<T> and gracefully handle null data (204 No Content).
- */
-async function unwrap<T>(promise: Promise<{ data: T }>): Promise<T> {
-  const response = await promise;
-  return response.data;
+export interface PagedResult<T> {
+  items: T[] | null;
+  pageIndex: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
 }
 
-export const fleetApi = {
-  // ============================================================
-  // Supervisor Dashboard
-  // ============================================================
-  getDashboard: () =>
-    unwrap<SupervisorDashboardDto>(
-      apiClient.get<SupervisorDashboardDto>(ENDPOINTS.SUPERVISOR.DASHBOARD),
-    ),
+// ---------- Roles ----------
 
-  // ============================================================
-  // Supervisor Wallet
-  // ============================================================
-  getWallet: () =>
-    unwrap<SupervisorWalletDto>(
-      apiClient.get<SupervisorWalletDto>(ENDPOINTS.SUPERVISOR.WALLET),
-    ),
+export type UserRole =
+  | "Customer"
+  | "Driver"
+  | "StoreOwner"
+  | "Admin"
+  | "Supervisor";
 
-  getWalletBalance: () =>
-    unwrap<{ balance: number; currency?: string }>(
-      apiClient.get<{ balance: number; currency?: string }>(
-        ENDPOINTS.SUPERVISOR.WALLET_BALANCE,
-      ),
-    ),
+// ---------- Auth ----------
 
-  withdraw: (dto: CreateWithdrawalDto) =>
-    unwrap<{ success: boolean }>(
-      apiClient.post<{ success: boolean }>(
-        ENDPOINTS.SUPERVISOR.WALLET_WITHDRAW,
-        dto,
-      ),
-    ),
+export interface LoginDto {
+  phoneNumber: string;
+  password: string;
+  role: UserRole;
+}
 
-  // ============================================================
-  // Drivers (Supervisor-managed)
-  // ============================================================
-  getDrivers: (params?: DriverFilterParams) =>
-    unwrap<PaginatedResponse<DriverDto>>(
-      apiClient.get<PaginatedResponse<DriverDto>>(
-        ENDPOINTS.SUPERVISOR.DRIVERS,
-        toQueryParams(params),
-      ),
-    ),
+export interface SendOtpDto {
+  phoneNumber: string;
+  role: UserRole;
+}
 
-  getDriver: (driverId: string) =>
-    unwrap<DriverDto>(
-      apiClient.get<DriverDto>(ENDPOINTS.SUPERVISOR.DRIVER_BY_ID(driverId)),
-    ),
+export interface VerifyOtpDto {
+  phoneNumber: string;
+  code: string;
+  role: UserRole;
+}
 
-  createDriver: (dto: SupervisorCreateDriverDto) =>
-    unwrap<DriverDto>(
-      apiClient.post<DriverDto>(ENDPOINTS.SUPERVISOR.CREATE_DRIVER, dto),
-    ),
+export interface OtpSentResponseDto {
+  message: string | null;
+  expiresInSeconds: number;
+  code: string | null;
+}
 
-  toggleDriverAvailability: (driverId: string) =>
-    unwrap<DriverDto | null>(
-      apiClient.patch<DriverDto | null>(
-        ENDPOINTS.SUPERVISOR.TOGGLE_DRIVER_AVAILABILITY(driverId),
-      ),
-    ),
+export interface AuthResponseDto {
+  userId: string;
+  phoneNumber: string | null;
+  fullName: string | null;
+  role: string | null;
+  token: string | null;
+  expiresAt: string;
+  refreshToken: string | null;
+  refreshTokenExpiresAt: string;
+  isActive: boolean;
+}
 
-  // ============================================================
-  // Orders (Supervisor-managed)
-  // ============================================================
-  getPendingOrders: (params?: OrderFilterParams) =>
-    unwrap<PaginatedResponse<SupervisorOrderDto>>(
-      apiClient.get<PaginatedResponse<SupervisorOrderDto>>(
-        ENDPOINTS.SUPERVISOR.ORDERS_PENDING,
-        toQueryParams(params),
-      ),
-    ),
+export interface RefreshTokenDto {
+  token: string | null;
+  refreshToken: string | null;
+}
 
-  getActiveOrders: (params?: OrderFilterParams) =>
-    unwrap<PaginatedResponse<SupervisorOrderDto>>(
-      apiClient.get<PaginatedResponse<SupervisorOrderDto>>(
-        ENDPOINTS.SUPERVISOR.ORDERS_ACTIVE,
-        toQueryParams(params),
-      ),
-    ),
+export interface ChangePasswordDto {
+  newPassword: string | null;
+}
 
-  assignOrder: (dto: AssignOrderDto) =>
-    unwrap<SupervisorOrderDto>(
-      apiClient.post<SupervisorOrderDto>(
-        ENDPOINTS.SUPERVISOR.ASSIGN_ORDER,
-        dto,
-      ),
-    ),
+// ---------- Supervisor profile ----------
 
-  reassignOrder: (orderId: string, dto: ReassignOrderDto) =>
-    unwrap<SupervisorOrderDto>(
-      apiClient.post<SupervisorOrderDto>(
-        ENDPOINTS.SUPERVISOR.REASSIGN_ORDER(orderId),
-        dto,
-      ),
-    ),
+export interface SupervisorProfileDto {
+  id: string;
+  fullName: string | null;
+  phoneNumber: string | null;
+  email: string | null;
+  profilePictureUrl: string | null;
+  isVerified: boolean;
+  verifiedAt: string | null;
+  cityId: string | null;
+  cityName: string | null;
+  areas: AreaSummaryDto[] | null;
+  createdAt: string;
+}
 
-  unassignOrder: (orderId: string) =>
-    unwrap<SupervisorOrderDto | null>(
-      apiClient.post<SupervisorOrderDto | null>(
-        ENDPOINTS.SUPERVISOR.UNASSIGN_ORDER(orderId),
-      ),
-    ),
+// ---------- Areas ----------
 
-  selfAssignOrder: (orderId: string) =>
-    unwrap<SupervisorOrderDto | null>(
-      apiClient.post<SupervisorOrderDto | null>(
-        ENDPOINTS.SUPERVISOR.SELF_ASSIGN_ORDER(orderId),
-      ),
-    ),
+export interface AreaSummaryDto {
+  areaId: string;
+  areaName: string | null;
+  driverCount: number;
+  pendingOrders: number;
+  activeOrders: number;
+}
 
-  // ============================================================
-  // Driver Registration Requests
-  // ============================================================
-  getDriverRequests: (params?: DriverRequestFilterParams) =>
-    unwrap<PaginatedResponse<DriverRequestDto>>(
-      apiClient.get<PaginatedResponse<DriverRequestDto>>(
-        ENDPOINTS.SUPERVISOR.DRIVER_REQUESTS,
-        toQueryParams(params),
-      ),
-    ),
+// ---------- Dashboard ----------
 
-  approveDriverRequest: (id: string) =>
-    unwrap<DriverRequestDto | null>(
-      apiClient.post<DriverRequestDto | null>(
-        ENDPOINTS.SUPERVISOR.APPROVE_DRIVER_REQUEST(id),
-      ),
-    ),
+export interface SupervisorDashboardDto {
+  totalDrivers: number;
+  onlineDrivers: number;
+  pendingOrders: number;
+  activeDeliveries: number;
+  completedToday: number;
+  areas: AreaSummaryDto[] | null;
+}
 
-  /**
-   * Reject a driver registration request.
-   * NOTE: The API spec currently expects a raw string body. This sends an
-   * object `{ reason }`. If the backend hasn't been updated, change the
-   * payload to `reason ?? ""` (raw string).
-   */
-  rejectDriverRequest: (id: string, reason?: string) =>
-    unwrap<DriverRequestDto | null>(
-      apiClient.post<DriverRequestDto | null>(
-        ENDPOINTS.SUPERVISOR.REJECT_DRIVER_REQUEST(id),
-        { reason },
-      ),
-    ),
-};
+// ============================================================
+// Driver Supervision
+// ============================================================
+
+export interface DriverSupervisionDto {
+  driverId: string;
+  fullName: string;
+  phoneNumber: string;
+
+  isOnline: boolean;
+  isVerified: boolean;
+
+  currentLatitude: number;
+  currentLongitude: number;
+  rating: number;
+  totalDeliveries: number;
+  todayDeliveries: number;
+
+  activeOrderId: string | null;
+  activeOrderStatus: string | null;
+  lastLocationUpdateAt: string | null;
+
+  vehicleType: string | null;
+  vehiclePlateNumber: string | null;
+
+  cityId: string | null;
+  cityAr: string | null;
+  cityEn: string | null;
+}
+
+export interface SupervisorDriverFilterDto {
+  IsOnline?: boolean;
+  IsAvailable?: boolean;
+  AreaId?: string;
+  Search?: string;
+  PageIndex?: number;
+  PageSize?: number;
+}
+
+export interface SupervisorCreateDriverDto {
+  fullName: string;
+  phoneNumber: string;
+  password: string;
+
+  email?: string | null;
+  profilePictureUrl?: string | null;
+
+  vehicleType: string;
+  vehiclePlateNumber: string;
+
+  cityId?: string | null;
+}
+
+export interface SupervisorUpdateDriverDto {
+  fullName?: string | null;
+  email?: string | null;
+  profilePictureUrl?: string | null;
+  vehicleType?: string | null;
+  vehiclePlateNumber?: string | null;
+  cityId?: string | null;
+}
+
+export type DriverLiveStatus = "on_trip" | "available" | "offline";
+
+export function deriveDriverStatus(
+  d: DriverSupervisionDto,
+): DriverLiveStatus {
+  if (d.activeOrderId) return "on_trip";
+  if (d.isOnline) return "available";
+  return "offline";
+}
+
+// ============================================================
+// Orders
+// ============================================================
+
+export interface SupervisorOrderDto {
+  orderId: string;
+  orderNumber: string | null;
+  status: string | null;
+  storeName: string | null;
+  customerName: string | null;
+  deliveryAddress: string | null;
+  totalAmount: number;
+  driverId: string | null;
+  driverName: string | null;
+  areaId: string | null;
+  supervisorId: string | null;
+  createdAt: string;
+}
+
+export const SUPERVISOR_ORDER_STATUS = {
+  Assigned: "Assigned",
+  Accepted: "Accepted",
+  ArrivedAtStore: "ArrivedAtStore",
+  ReadyForPickup: "ReadyForPickup",
+  PickedUp: "PickedUp",
+  InTransit: "InTransit",
+  Delivered: "Delivered",
+  Cancelled: "Cancelled",
+  Failed: "Failed",
+} as const;
+
+export type SupervisorOrderStatus =
+  (typeof SUPERVISOR_ORDER_STATUS)[keyof typeof SUPERVISOR_ORDER_STATUS];
+
+export interface AssignOrderDto {
+  orderId: string;
+  driverId: string;
+  notes: string | null;
+}
+
+export interface ReassignOrderDto {
+  driverId: string;
+  notes: string | null;
+}
+
+// ---------- Query params ----------
+
+export interface SupervisorOrderListQuery {
+  Status?: string;
+  DriverId?: string;
+  AreaId?: string;
+  From?: string;
+  To?: string;
+  PageIndex?: number;
+  PageSize?: number;
+}
+
+// ============================================================
+// Wallet
+// ============================================================
+
+export interface WalletSummaryDto {
+  walletId: string;
+  balance: number;
+  totalIn: number;
+  totalOut: number;
+  currency: string | null;
+  minimumWithdrawalAmount: number;
+  canRequestWithdrawal: boolean;
+  pendingWithdrawalCount: number;
+  pendingWithdrawalAmount: number;
+  recentTransactions: WalletTransactionDto[] | null;
+}
+
+export interface WalletTransactionDto {
+  id: string;
+  type: string | null;
+  amount: number;
+  balanceAfter: number;
+  description: string | null;
+  orderId: string | null;
+  orderNumber: string | null;
+  referenceNumber: string | null;
+  createdAt: string;
+}
+
+export interface WithdrawalDto {
+  id: string;
+  amount: number;
+  status: string | null;
+  notes: string | null;
+  rejectionReason: string | null;
+  paymentReference: string | null;
+  processedAt: string | null;
+  createdAt: string;
+}
+
+export interface RequestWithdrawalDto {
+  amount: number;
+}
+
+export interface WalletTransactionListQuery {
+  Type?: string;
+  OrderId?: string;
+  From?: string;
+  To?: string;
+  PageIndex?: number;
+  PageSize?: number;
+}
+
+// ============================================================
+// Notifications
+// ============================================================
+
+export interface NotificationPayloadDto {
+  action: string | null;
+  targetPage: string | null;
+  targetId: string | null;
+  extra: Record<string, string> | null;
+}
+
+export interface NotificationSummaryDto {
+  id: string;
+  type: string | null;
+  title: string | null;
+  body: string | null;
+  payload: NotificationPayloadDto;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface NotificationDto {
+  id: string;
+  recipientId: string;
+  recipientType: string | null;
+  type: string | null;
+  title: string | null;
+  body: string | null;
+  payload: NotificationPayloadDto;
+  isRead: boolean;
+  readAt: string | null;
+  isSent: boolean;
+  sentAt: string | null;
+  isDelivered: boolean;
+  deliveredAt: string | null;
+  createdAt: string;
+}
+
+export interface UnreadCountDto {
+  total: number;
+  byType: Record<string, number> | null;
+}
+
+export interface NotificationPreferencesDto {
+  pushEnabled: boolean;
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  orderUpdates: boolean;
+  promotions: boolean;
+  chatMessages: boolean;
+  systemAlerts: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursFrom: string | null;
+  quietHoursTo: string | null;
+}
+
+export interface MarkAllAsReadResultDto {
+  countMarkedAsRead: number;
+  markedAt: string;
+}
+
+export interface NotificationListQuery {
+  Type?: string;
+  IsRead?: boolean;
+  From?: string;
+  To?: string;
+  pageIndex?: number;
+  pageSize?: number;
+}
+
+// ============================================================
+// Files
+// ============================================================
+
+export interface FileUploadResultDto {
+  url: string | null;
+  relativePath: string | null;
+  fileName: string | null;
+  sizeInBytes: number;
+  contentType: string | null;
+}
+
+// ============================================================
+// Cities
+// ============================================================
+
+export interface CityListDto {
+  id: string;
+  name: string | null;
+  isActive: boolean;
+}

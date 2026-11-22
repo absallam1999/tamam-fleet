@@ -10,7 +10,8 @@ import {
   useMarkAsRead,
   useMarkAllAsRead,
   useDeleteNotification,
-  useDeleteAllNotifications,
+  useDeleteNotifications,
+  localizeNotification,
   type FleetNotificationDto,
 } from "@shared/hooks/useFleetNotifications";
 
@@ -25,18 +26,15 @@ const t = {
     en: "All notifications and alerts",
   },
 
-  // Actions
   markAllRead: { ar: "تحديد الكل كمقروء", en: "Mark All as Read" },
   markRead: { ar: "تحديد كمقروء", en: "Mark as Read" },
   refresh: { ar: "تحديث", en: "Refresh" },
   delete: { ar: "حذف", en: "Delete" },
   deleteAll: { ar: "حذف الكل", en: "Delete All" },
 
-  // Tabs
   all: { ar: "الكل", en: "All" },
   unread: { ar: "غير مقروء", en: "Unread" },
 
-  // Empty
   noNotifications: { ar: "لا توجد إشعارات", en: "No notifications" },
   noNotificationsDesc: {
     ar: "ستظهر إشعاراتك هنا عند ورودها",
@@ -44,16 +42,13 @@ const t = {
   },
   noUnread: { ar: "لا توجد إشعارات غير مقروءة", en: "No unread notifications" },
 
-  // Status
   unreadCount: { ar: "غير مقروء", en: "unread" },
   read: { ar: "مقروء", en: "Read" },
 
-  // Loading
   loading: { ar: "جاري تحميل الإشعارات...", en: "Loading notifications..." },
   error: { ar: "فشل تحميل الإشعارات", en: "Failed to load notifications" },
   retry: { ar: "إعادة المحاولة", en: "Retry" },
 
-  // Confirm
   confirmDeleteAll: {
     ar: "هل أنت متأكد من حذف جميع الإشعارات؟",
     en: "Are you sure you want to delete all notifications?",
@@ -66,7 +61,7 @@ const t = {
 };
 
 // ============================================
-// NotificationsPage — Main Component
+// Main Component
 // ============================================
 
 export const NotificationsPage: React.FC = () => {
@@ -92,7 +87,7 @@ export const NotificationsPage: React.FC = () => {
   const markAsRead = useMarkAsRead();
   const markAllAsRead = useMarkAllAsRead();
   const deleteNotification = useDeleteNotification();
-  const deleteAllNotifications = useDeleteAllNotifications();
+  const deleteAllNotifications = useDeleteNotifications();
 
   const unreadCount = unreadData?.count ?? 0;
 
@@ -134,8 +129,12 @@ export const NotificationsPage: React.FC = () => {
   };
 
   const handleDeleteAll = () => {
+    if (filteredNotifications.length === 0) return;
+
+    const idsToDelete = filteredNotifications.map((n) => n.id);
+
     if (window.confirm(lang(t.confirmDeleteAll))) {
-      deleteAllNotifications.mutate(undefined, {
+      deleteAllNotifications.mutate(idsToDelete, {
         onSuccess: () => {
           toast.success(lang(t.deletedAll));
         },
@@ -351,139 +350,149 @@ export const NotificationsPage: React.FC = () => {
           </div>
         ) : (
           <div className="divide-y divide-surface-100 dark:divide-surface-800/30">
-            {filteredNotifications.map((notification) => (
-              <div
-                key={notification.id}
-                className={cn(
-                  "flex items-start gap-4 transition-colors group",
-                  "hover:bg-surface-50 dark:hover:bg-surface-800/30",
-                  !notification.isRead &&
-                    "bg-primary-50/40 dark:bg-primary-950/15 border-s-2 border-primary-500 dark:border-primary-400",
-                )}
-              >
-                <button
-                  onClick={() => handleMarkAsRead(notification)}
-                  className="flex-1 text-start px-5 py-4 flex items-start gap-4 min-w-0"
-                >
-                  {/* Icon */}
-                  <div
-                    className={cn(
-                      "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-                      notification.isRead
-                        ? "bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400"
-                        : "bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400",
-                    )}
-                  >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
-                      />
-                    </svg>
-                  </div>
+            {filteredNotifications.map((notification) => {
+              const { title, body } = localizeNotification(
+                notification,
+                isAr ? "ar" : "en",
+              );
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <p
-                        className={cn(
-                          "text-sm truncate",
-                          notification.isRead
-                            ? "font-medium text-surface-700 dark:text-surface-300"
-                            : "font-semibold text-surface-900 dark:text-surface-100",
-                        )}
+              return (
+                <div
+                  key={notification.id}
+                  className={cn(
+                    "flex items-start gap-4 transition-colors group",
+                    "hover:bg-surface-50 dark:hover:bg-surface-800/30",
+                    !notification.isRead &&
+                      "bg-primary-50/40 dark:bg-primary-950/15 border-s-2 border-primary-500 dark:border-primary-400",
+                  )}
+                >
+                  <button
+                    onClick={() => handleMarkAsRead(notification)}
+                    className="flex-1 text-start px-5 py-4 flex items-start gap-4 min-w-0"
+                  >
+                    {/* Icon */}
+                    <div
+                      className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                        notification.isRead
+                          ? "bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400"
+                          : "bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400",
+                      )}
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={1.5}
+                        stroke="currentColor"
                       >
-                        {notification.title}
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
+                        />
+                      </svg>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <p
+                          className={cn(
+                            "text-sm truncate",
+                            notification.isRead
+                              ? "font-medium text-surface-700 dark:text-surface-300"
+                              : "font-semibold text-surface-900 dark:text-surface-100",
+                          )}
+                        >
+                          {title}
+                        </p>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {!notification.isRead && (
+                            <span className="w-2 h-2 rounded-full bg-primary-500 shadow-[0_0_6px_rgba(59,130,246,0.4)]" />
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-surface-500 dark:text-surface-400 mt-1 line-clamp-2 leading-relaxed">
+                        {body}
                       </p>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {!notification.isRead && (
-                          <span className="w-2 h-2 rounded-full bg-primary-500 shadow-[0_0_6px_rgba(59,130,246,0.4)]" />
+                      <div className="flex items-center gap-2 mt-2">
+                        <p className="text-[10px] text-surface-400 dark:text-surface-500 font-medium">
+                          {getRelativeTime(
+                            notification.createdAt,
+                            isAr ? "ar" : "en",
+                          )}
+                        </p>
+                        {notification.isRead ? (
+                          <span className="text-[10px] text-surface-400 dark:text-surface-500">
+                            {lang(t.read)}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-primary-600 dark:text-primary-400 font-medium">
+                            {lang(t.unreadCount)}
+                          </span>
                         )}
                       </div>
                     </div>
-                    <p className="text-xs text-surface-500 dark:text-surface-400 mt-1 line-clamp-2 leading-relaxed">
-                      {notification.body}
-                    </p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <p className="text-[10px] text-surface-400 dark:text-surface-500 font-medium">
-                        {getRelativeTime(notification.createdAt)}
-                      </p>
-                      {notification.isRead ? (
-                        <span className="text-[10px] text-surface-400 dark:text-surface-500">
-                          {lang(t.read)}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-primary-600 dark:text-primary-400 font-medium">
-                          {lang(t.unreadCount)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
+                  </button>
 
-                {/* Delete button */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(notification.id);
-                  }}
-                  disabled={deletingId === notification.id}
-                  className={cn(
-                    "p-2 mr-2 mt-3 rounded-xl transition-all duration-200 flex-shrink-0",
-                    "text-surface-400 dark:text-surface-500",
-                    "hover:text-error-600 hover:bg-error-50 dark:hover:text-error-400 dark:hover:bg-error-950/30",
-                    "opacity-0 group-hover:opacity-100",
-                    "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-500/50",
-                    "disabled:opacity-50 disabled:cursor-not-allowed",
-                    isAr ? "mr-0 ml-2" : "mr-2 ml-0",
-                  )}
-                  title={lang(t.delete)}
-                >
-                  {deletingId === notification.id ? (
-                    <svg
-                      className="w-4 h-4 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
+                  {/* Delete button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(notification.id);
+                    }}
+                    disabled={deletingId === notification.id}
+                    className={cn(
+                      "p-2 mr-2 mt-3 rounded-xl transition-all duration-200 flex-shrink-0",
+                      "text-surface-400 dark:text-surface-500",
+                      "hover:text-error-600 hover:bg-error-50 dark:hover:text-error-400 dark:hover:bg-error-950/30",
+                      "opacity-0 group-hover:opacity-100",
+                      "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-500/50",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                      isAr ? "mr-0 ml-2" : "mr-2 ml-0",
+                    )}
+                    title={lang(t.delete)}
+                  >
+                    {deletingId === notification.id ? (
+                      <svg
+                        className="w-4 h-4 animate-spin"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={1.5}
                         stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
-                  ) : (
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
-                      />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            ))}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ENDPOINTS } from "@/config/api";
@@ -6,49 +6,32 @@ import type {
   SupervisorOrderDto,
   AssignOrderDto,
   ReassignOrderDto,
-  DriverDto,
-  PaginatedResponse,
+  DriverSupervisionDto,
+  PagedResult,
 } from "@shared/types";
 import { useToast } from "@shared/components/Toaster";
 import { useLanguage } from "@/shared/hooks/useLanguage";
+
+// ============================================
+// Keys
+// ============================================
 
 export const PENDING_ORDERS_KEY = "fleet-supervisor-pending-orders";
 export const ACTIVE_ORDERS_KEY = "fleet-supervisor-active-orders";
 export const AVAILABLE_DRIVERS_KEY = "fleet-supervisor-available-drivers";
 
 // ============================================
-// Helper: Recursively extract array from various shapes
+// Status helpers 
 // ============================================
 
-function extractArray<T>(data: unknown): T[] {
-  if (Array.isArray(data)) return data as T[];
+const TERMINAL_STATUSES = new Set<string>([
+  "Delivered",
+  "Cancelled",
+  "Failed",
+]);
 
-  if (data && typeof data === "object") {
-    const obj = data as Record<string, unknown>;
-
-    // Direct keys
-    if (Array.isArray(obj.items)) return obj.items as T[];
-    if (Array.isArray(obj.data)) return obj.data as T[];
-
-    // Nested: { data: { items: [] } } or { data: { data: [] } }
-    if (obj.data && typeof obj.data === "object") {
-      const inner = obj.data as Record<string, unknown>;
-      if (Array.isArray(inner.items)) return inner.items as T[];
-      if (Array.isArray(inner.data)) return inner.data as T[];
-    }
-
-    // Nested: { items: { items: [] } } (unlikely but safe)
-    if (obj.items && typeof obj.items === "object") {
-      const inner = obj.items as Record<string, unknown>;
-      if (Array.isArray(inner.items)) return inner.items as T[];
-      if (Array.isArray(inner.data)) return inner.data as T[];
-    }
-  }
-
-  // If nothing found, log warning and return empty array
-  console.warn("Unexpected order list shape:", data);
-  return [];
-}
+const isTerminalStatus = (status: string | null | undefined): boolean =>
+  !!status && TERMINAL_STATUSES.has(status);
 
 // ============================================
 // Hook
@@ -61,17 +44,21 @@ export function useFleetOrders() {
   const isAr = currentLanguage === "ar";
 
   const [activeTab, setActiveTab] = useState<"pending" | "active">("pending");
+
+  // Assign modal
   const [assignTarget, setAssignTarget] = useState<SupervisorOrderDto | null>(
     null,
   );
   const [selectedDriverId, setSelectedDriverId] = useState<string>("");
   const [assignNotes, setAssignNotes] = useState("");
+
+  // Reassign modal
   const [reassignTarget, setReassignTarget] =
     useState<SupervisorOrderDto | null>(null);
   const [reassignDriverId, setReassignDriverId] = useState<string>("");
   const [reassignNotes, setReassignNotes] = useState("");
 
-  // GET /api/supervisor/orders/pending
+  // ── PENDING ──
   const {
     data: pendingOrdersData,
     isLoading: pendingLoading,
@@ -81,64 +68,75 @@ export function useFleetOrders() {
   } = useQuery<SupervisorOrderDto[]>({
     queryKey: [PENDING_ORDERS_KEY],
     queryFn: async () => {
-      const response = await apiClient.get<unknown>(
-        ENDPOINTS.SUPERVISOR.ORDERS_PENDING,
+      const response = await apiClient.get<PagedResult<SupervisorOrderDto>>(
+        ENDPOINTS.SUPERVISOR.ORDERS_UNASSIGNED,
+        { PageIndex: 1, PageSize: 100 },
       );
-      console.log("Pending orders raw response:", response.data); // debug
-      return extractArray<SupervisorOrderDto>(response.data);
+      return response.data?.items ?? [];
     },
     staleTime: 15_000,
     refetchInterval: 30_000,
   });
 
-  // GET /api/supervisor/orders/active
+  // ── ALL ORDERS ──
   const {
-    data: activeOrdersData,
-    isLoading: activeLoading,
-    isError: activeError,
-    error: activeErr,
-    refetch: refetchActive,
+    data: allOrdersData,
+    isLoading: allOrdersLoading,
+    isError: allOrdersError,
+    error: allOrdersErr,
+    refetch: refetchAllOrders,
   } = useQuery<SupervisorOrderDto[]>({
     queryKey: [ACTIVE_ORDERS_KEY],
     queryFn: async () => {
-      const response = await apiClient.get<unknown>(
-        ENDPOINTS.SUPERVISOR.ORDERS_ACTIVE,
+      const response = await apiClient.get<PagedResult<SupervisorOrderDto>>(
+        ENDPOINTS.SUPERVISOR.ORDERS,
+        { PageIndex: 1, PageSize: 200 },
       );
-      console.log("Active orders raw response:", response.data); // debug
-      return extractArray<SupervisorOrderDto>(response.data);
+      return response.data?.items ?? [];
     },
     staleTime: 15_000,
     refetchInterval: 30_000,
   });
 
-  // GET /api/supervisor/drivers (paginated)
-  const { data: driversData } = useQuery<PaginatedResponse<DriverDto>>({
+  // ── ACTIVE ──
+  const activeOrders: SupervisorOrderDto[] = useMemo(
+    () =>
+      (allOrdersData ?? []).filter(
+        (o) => o.driverId != null && !isTerminalStatus(o.status),
+      ),
+    [allOrdersData],
+  );
+
+  // ── AVAILABLE DRIVERS ──
+  const {
+    data: availableDriversData,
+    isLoading: driversLoading,
+  } = useQuery<DriverSupervisionDto[]>({
     queryKey: [AVAILABLE_DRIVERS_KEY],
     queryFn: async () => {
-      const response = await apiClient.get<PaginatedResponse<DriverDto>>(
-        ENDPOINTS.SUPERVISOR.DRIVERS,
+      const response = await apiClient.get<DriverSupervisionDto[]>(
+        ENDPOINTS.SUPERVISOR.DRIVERS_AVAILABLE,
       );
-      return response.data;
+      return response.data ?? [];
     },
     staleTime: 30_000,
   });
 
-  // Guarantee arrays with fallback
-  const pendingOrders = Array.isArray(pendingOrdersData)
-    ? pendingOrdersData
-    : [];
-  const activeOrders = Array.isArray(activeOrdersData) ? activeOrdersData : [];
-  const drivers = driversData?.items ?? [];
-  const availableDrivers = drivers.filter((d) => d.status === "available");
+  const pendingOrders = pendingOrdersData ?? [];
+  const availableDrivers = availableDriversData ?? [];
 
-  // Mutations (unchanged except explicit void returns)
-  const assignOrder = useMutation({
-    mutationFn: async (dto: AssignOrderDto) => {
+  // ============================================
+  // Mutations
+  // ============================================
+
+  const assignOrder = useMutation<void, Error, AssignOrderDto>({
+    mutationFn: async (dto) => {
       await apiClient.post<void>(ENDPOINTS.SUPERVISOR.ASSIGN_ORDER, dto);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [PENDING_ORDERS_KEY] });
       queryClient.invalidateQueries({ queryKey: [ACTIVE_ORDERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [AVAILABLE_DRIVERS_KEY] });
       toast.success(
         isAr ? "تم تعيين الطلب بنجاح" : "Order assigned successfully",
       );
@@ -153,14 +151,12 @@ export function useFleetOrders() {
     },
   });
 
-  const reassignOrder = useMutation({
-    mutationFn: async ({
-      orderId,
-      dto,
-    }: {
-      orderId: string;
-      dto: ReassignOrderDto;
-    }) => {
+  const reassignOrder = useMutation<
+    void,
+    Error,
+    { orderId: string; dto: ReassignOrderDto }
+  >({
+    mutationFn: async ({ orderId, dto }) => {
       await apiClient.post<void>(
         ENDPOINTS.SUPERVISOR.REASSIGN_ORDER(orderId),
         dto,
@@ -169,39 +165,52 @@ export function useFleetOrders() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [PENDING_ORDERS_KEY] });
       queryClient.invalidateQueries({ queryKey: [ACTIVE_ORDERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [AVAILABLE_DRIVERS_KEY] });
       toast.success(
-        isAr ? "تم إعادة تعيين الطلب بنجاح" : "Order reassigned successfully",
+        isAr
+          ? "تم إعادة تعيين الطلب بنجاح"
+          : "Order reassigned successfully",
       );
       setReassignTarget(null);
       setReassignDriverId("");
       setReassignNotes("");
     },
     onError: (err: Error) => {
-      toast.error(isAr ? "فشل إعادة تعيين الطلب" : "Failed to reassign order", {
-        description: err.message,
-      });
+      toast.error(
+        isAr ? "فشل إعادة تعيين الطلب" : "Failed to reassign order",
+        { description: err.message },
+      );
     },
   });
 
-  const unassignOrder = useMutation({
-    mutationFn: async (orderId: string) => {
-      await apiClient.post<void>(ENDPOINTS.SUPERVISOR.UNASSIGN_ORDER(orderId));
+  const unassignOrder = useMutation<void, Error, string>({
+    mutationFn: async (orderId) => {
+      await apiClient.delete<void>(
+        ENDPOINTS.SUPERVISOR.UNASSIGN_ORDER(orderId),
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [PENDING_ORDERS_KEY] });
       queryClient.invalidateQueries({ queryKey: [ACTIVE_ORDERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [AVAILABLE_DRIVERS_KEY] });
       toast.success(
-        isAr ? "تم إلغاء تعيين الطلب بنجاح" : "Order unassigned successfully",
+        isAr
+          ? "تم إلغاء تعيين الطلب بنجاح"
+          : "Order unassigned successfully",
       );
     },
     onError: (err: Error) => {
-      toast.error(isAr ? "فشل إلغاء تعيين الطلب" : "Failed to unassign order", {
-        description: err.message,
-      });
+      toast.error(
+        isAr ? "فشل إلغاء تعيين الطلب" : "Failed to unassign order",
+        { description: err.message },
+      );
     },
   });
 
-  // Handlers (unchanged)
+  // ============================================
+  // Handlers
+  // ============================================
+
   const handleOpenAssign = useCallback((order: SupervisorOrderDto) => {
     setAssignTarget(order);
     setSelectedDriverId("");
@@ -215,13 +224,12 @@ export function useFleetOrders() {
   }, []);
 
   const handleConfirmAssign = useCallback(() => {
-    if (assignTarget && selectedDriverId) {
-      assignOrder.mutate({
-        orderId: assignTarget.id,
-        driverId: selectedDriverId,
-        notes: assignNotes || undefined,
-      });
-    }
+    if (!assignTarget || !selectedDriverId) return;
+    assignOrder.mutate({
+      orderId: assignTarget.orderId,
+      driverId: selectedDriverId,
+      notes: assignNotes.trim() || null,
+    });
   }, [assignTarget, selectedDriverId, assignNotes, assignOrder]);
 
   const handleOpenReassign = useCallback((order: SupervisorOrderDto) => {
@@ -237,18 +245,20 @@ export function useFleetOrders() {
   }, []);
 
   const handleConfirmReassign = useCallback(() => {
-    if (reassignTarget && reassignDriverId) {
-      reassignOrder.mutate({
-        orderId: reassignTarget.id,
-        dto: { driverId: reassignDriverId, notes: reassignNotes || undefined },
-      });
-    }
+    if (!reassignTarget || !reassignDriverId) return;
+    reassignOrder.mutate({
+      orderId: reassignTarget.orderId,
+      dto: {
+        driverId: reassignDriverId,
+        notes: reassignNotes.trim() || null,
+      },
+    });
   }, [reassignTarget, reassignDriverId, reassignNotes, reassignOrder]);
 
   const handleUnassign = useCallback(
     (orderId: string) => {
       if (
-        confirm(
+        window.confirm(
           isAr
             ? "هل أنت متأكد من إلغاء تعيين هذا الطلب؟"
             : "Are you sure you want to unassign this order?",
@@ -261,19 +271,30 @@ export function useFleetOrders() {
   );
 
   return {
+    // Lists
     pendingOrders,
     activeOrders,
     availableDrivers,
+
+    // Loading / error
     pendingLoading,
-    activeLoading,
+    activeLoading: allOrdersLoading,
     pendingError,
-    activeError,
+    activeError: allOrdersError,
     pendingErr,
-    activeErr,
+    activeErr: allOrdersErr,
+
+    // Refetch
     refetchPending,
-    refetchActive,
+    refetchActive: refetchAllOrders,
+    refetchAvailableDrivers: () =>
+      queryClient.invalidateQueries({ queryKey: [AVAILABLE_DRIVERS_KEY] }),
+
+    // Tab
     activeTab,
     setActiveTab,
+
+    // Assign
     assignTarget,
     selectedDriverId,
     setSelectedDriverId,
@@ -283,6 +304,8 @@ export function useFleetOrders() {
     handleOpenAssign,
     handleCloseAssign,
     handleConfirmAssign,
+
+    // Reassign
     reassignTarget,
     reassignDriverId,
     setReassignDriverId,
@@ -292,7 +315,12 @@ export function useFleetOrders() {
     handleOpenReassign,
     handleCloseReassign,
     handleConfirmReassign,
+
+    // Unassign
     unassignOrder,
     handleUnassign,
+
+    // Meta
+    driversLoading,
   };
 }

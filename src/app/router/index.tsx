@@ -16,6 +16,12 @@ const LoginPage = lazy(() =>
   })),
 );
 
+const RegisterPage = lazy(() =>
+  import("@/features/auth/RegisterPage").then((m) => ({
+    default: m.RegisterPage,
+  })),
+);
+
 const ForgotPasswordPage = lazy(() =>
   import("@/features/auth/ForgotPasswordPage").then((m) => ({
     default: m.ForgotPasswordPage,
@@ -118,6 +124,14 @@ export const AppRouter: React.FC = () => {
           element={
             <Suspense fallback={<PageLoader />}>
               <LoginPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/auth/register"
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <RegisterPage />
             </Suspense>
           }
         />

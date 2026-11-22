@@ -9,8 +9,10 @@ import {
   useUpdateDriver,
   useDriverDetail,
 } from "@shared/hooks/useFleetDrivers";
-import type { SupervisorCreateDriverDto } from "@shared/types";
-import type { SupervisorUpdateDriverDto } from "@shared/hooks/useFleetDrivers";
+import type {
+  SupervisorCreateDriverDto,
+  SupervisorUpdateDriverDto,
+} from "@shared/types";
 
 // ============================================
 // Translations
@@ -56,8 +58,13 @@ const t = {
   toktok: { ar: "توك توك", en: "Toktok" },
   truck: { ar: "شاحنة", en: "Truck" },
 
-  // Optional
+  // Optional / read-only hints
   optional: { ar: "اختياري", en: "Optional" },
+  cannotEdit: { ar: "لا يمكن تعديله", en: "Cannot be changed" },
+  phoneReadOnlyHint: {
+    ar: "لا يمكن تعديل رقم الهاتف بعد إنشاء الحساب",
+    en: "Phone number cannot be changed after account creation",
+  },
 
   // Actions
   save: { ar: "حفظ", en: "Save" },
@@ -85,6 +92,14 @@ const t = {
     ar: "يرجى إدخال بريد إلكتروني صحيح",
     en: "Please enter a valid email",
   },
+  vehicleTypeRequired: {
+    ar: "نوع المركبة مطلوب",
+    en: "Vehicle type is required",
+  },
+  vehiclePlateRequired: {
+    ar: "رقم اللوحة مطلوب",
+    en: "Plate number is required",
+  },
 
   // Loading
   loading: { ar: "جاري تحميل بيانات السائق...", en: "Loading driver data..." },
@@ -110,6 +125,8 @@ interface FormErrors {
   phoneNumber?: string;
   password?: string;
   email?: string;
+  vehicleType?: string;
+  vehiclePlateNumber?: string;
 }
 
 // ============================================
@@ -166,13 +183,16 @@ export const DriverFormPage: React.FC = () => {
   // Validation
   const validate = (): boolean => {
     const newErrors: FormErrors = {};
+
     if (!form.fullName.trim()) newErrors.fullName = lang(t.fullNameRequired);
-    if (!form.phoneNumber.trim()) {
-      newErrors.phoneNumber = lang(t.phoneRequired);
-    } else if (!/^\d{7,15}$/.test(form.phoneNumber.trim())) {
-      newErrors.phoneNumber = lang(t.phoneInvalid);
-    }
+
+    // Phone required only on create (API doesn't allow phone updates)
     if (!isEditMode) {
+      if (!form.phoneNumber.trim()) {
+        newErrors.phoneNumber = lang(t.phoneRequired);
+      } else if (!/^\d{7,15}$/.test(form.phoneNumber.trim())) {
+        newErrors.phoneNumber = lang(t.phoneInvalid);
+      }
       if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
         newErrors.email = lang(t.emailInvalid);
       }
@@ -181,7 +201,15 @@ export const DriverFormPage: React.FC = () => {
       } else if (form.password.length < 6) {
         newErrors.password = lang(t.passwordLength);
       }
+      // Vehicle fields are REQUIRED on create (API enforces this)
+      if (!form.vehicleType) {
+        newErrors.vehicleType = lang(t.vehicleTypeRequired);
+      }
+      if (!form.vehiclePlateNumber.trim()) {
+        newErrors.vehiclePlateNumber = lang(t.vehiclePlateRequired);
+      }
     }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -206,16 +234,19 @@ export const DriverFormPage: React.FC = () => {
     setTouched({
       fullName: true,
       phoneNumber: true,
-      ...(isEditMode ? {} : { password: true }),
+      password: !isEditMode,
+      vehicleType: !isEditMode,
+      vehiclePlateNumber: !isEditMode,
     });
     if (!validate()) return;
 
     if (isEditMode && driverId) {
+      // ⚠️ UpdateDriverDto has NO phoneNumber field
       const dto: SupervisorUpdateDriverDto = {
         fullName: form.fullName.trim(),
-        phoneNumber: form.phoneNumber.trim(),
-        vehicleType: form.vehicleType || undefined,
-        vehiclePlateNumber: form.vehiclePlateNumber.trim() || undefined,
+        email: form.email.trim() || null,
+        vehicleType: form.vehicleType || null,
+        vehiclePlateNumber: form.vehiclePlateNumber.trim() || null,
       };
 
       updateDriver.mutate(
@@ -231,13 +262,14 @@ export const DriverFormPage: React.FC = () => {
         },
       );
     } else {
+      // ⚠️ CreateDriverDto REQUIRES vehicleType + vehiclePlateNumber (non-null)
       const dto: SupervisorCreateDriverDto = {
         fullName: form.fullName.trim(),
         phoneNumber: form.phoneNumber.trim(),
-        email: form.email.trim() || undefined,
+        email: form.email.trim() || null,
         password: form.password,
-        vehicleType: form.vehicleType || undefined,
-        vehiclePlateNumber: form.vehiclePlateNumber.trim() || undefined,
+        vehicleType: form.vehicleType,
+        vehiclePlateNumber: form.vehiclePlateNumber.trim(),
       };
       createDriver.mutate(dto, {
         onSuccess: () => {
@@ -418,23 +450,39 @@ export const DriverFormPage: React.FC = () => {
               )}
             </div>
 
-            {/* Phone + Email (Email hidden in edit mode) */}
+            {/* Phone + Email */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-1.5">
                 <label className="flex items-center gap-1 text-xs font-semibold text-surface-600 dark:text-surface-400">
                   {lang(t.phoneNumber)}{" "}
-                  <span className="text-error-500">*</span>
+                  {!isEditMode ? (
+                    <span className="text-error-500">*</span>
+                  ) : (
+                    <span className="font-normal text-surface-400 text-[10px]">
+                      ({lang(t.cannotEdit)})
+                    </span>
+                  )}
                 </label>
                 <input
                   type="tel"
                   value={form.phoneNumber}
                   onChange={(e) => handleChange("phoneNumber", e.target.value)}
                   onBlur={() => handleBlur("phoneNumber")}
-                  className={inputClasses("phoneNumber", true)}
+                  className={cn(
+                    inputClasses("phoneNumber", true),
+                    isEditMode &&
+                      "opacity-60 cursor-not-allowed bg-surface-50 dark:bg-surface-900/50",
+                  )}
                   dir="ltr"
                   placeholder={lang(t.phonePlaceholder)}
+                  disabled={isEditMode}
                 />
-                {errors.phoneNumber && touched.phoneNumber && (
+                {isEditMode && (
+                  <p className="text-[11px] text-surface-400 dark:text-surface-500 mt-1">
+                    {lang(t.phoneReadOnlyHint)}
+                  </p>
+                )}
+                {!isEditMode && errors.phoneNumber && touched.phoneNumber && (
                   <p className="text-xs text-error-500 flex items-center gap-1">
                     <svg
                       className="w-3 h-3 flex-shrink-0"
@@ -453,43 +501,41 @@ export const DriverFormPage: React.FC = () => {
                   </p>
                 )}
               </div>
-              {!isEditMode && (
-                <div className="space-y-1.5">
-                  <label className="flex items-center gap-1 text-xs font-semibold text-surface-600 dark:text-surface-400">
-                    {lang(t.email)}{" "}
-                    <span className="font-normal text-surface-400 text-[10px]">
-                      ({lang(t.optional)})
-                    </span>
-                  </label>
-                  <input
-                    type="email"
-                    value={form.email}
-                    onChange={(e) => handleChange("email", e.target.value)}
-                    onBlur={() => handleBlur("email")}
-                    className={inputClasses("email", true)}
-                    dir="ltr"
-                    placeholder={lang(t.emailPlaceholder)}
-                  />
-                  {errors.email && touched.email && (
-                    <p className="text-xs text-error-500 flex items-center gap-1">
-                      <svg
-                        className="w-3 h-3 flex-shrink-0"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={2}
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
-                        />
-                      </svg>
-                      {errors.email}
-                    </p>
-                  )}
-                </div>
-              )}
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-1 text-xs font-semibold text-surface-600 dark:text-surface-400">
+                  {lang(t.email)}{" "}
+                  <span className="font-normal text-surface-400 text-[10px]">
+                    ({lang(t.optional)})
+                  </span>
+                </label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => handleChange("email", e.target.value)}
+                  onBlur={() => handleBlur("email")}
+                  className={inputClasses("email", true)}
+                  dir="ltr"
+                  placeholder={lang(t.emailPlaceholder)}
+                />
+                {errors.email && touched.email && (
+                  <p className="text-xs text-error-500 flex items-center gap-1">
+                    <svg
+                      className="w-3 h-3 flex-shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+                      />
+                    </svg>
+                    {errors.email}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Password (create only) */}
@@ -597,19 +643,30 @@ export const DriverFormPage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* Vehicle Type */}
+            {/* Vehicle Type — required on create, optional on edit */}
             <div className="space-y-1.5">
               <label className="flex items-center gap-1 text-xs font-semibold text-surface-600 dark:text-surface-400">
                 {lang(t.vehicleType)}{" "}
-                <span className="font-normal text-surface-400 text-[10px]">
-                  ({lang(t.optional)})
-                </span>
+                {!isEditMode ? (
+                  <span className="text-error-500">*</span>
+                ) : (
+                  <span className="font-normal text-surface-400 text-[10px]">
+                    ({lang(t.optional)})
+                  </span>
+                )}
               </label>
               <div className="relative">
                 <select
                   value={form.vehicleType}
                   onChange={(e) => handleChange("vehicleType", e.target.value)}
-                  className={selectClasses}
+                  onBlur={() => handleBlur("vehicleType")}
+                  className={cn(
+                    selectClasses,
+                    !isEditMode &&
+                      errors.vehicleType &&
+                      touched.vehicleType &&
+                      "border-error-400 dark:border-error-500",
+                  )}
                 >
                   <option value="">{lang(t.selectVehicleType)}</option>
                   <option value="motorcycle">{lang(t.motorcycle)}</option>
@@ -634,15 +691,39 @@ export const DriverFormPage: React.FC = () => {
                   </svg>
                 </div>
               </div>
+              {!isEditMode &&
+                errors.vehicleType &&
+                touched.vehicleType && (
+                  <p className="text-xs text-error-500 flex items-center gap-1">
+                    <svg
+                      className="w-3 h-3 flex-shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+                      />
+                    </svg>
+                    {errors.vehicleType}
+                  </p>
+                )}
             </div>
 
-            {/* Vehicle Plate */}
+            {/* Vehicle Plate — required on create, optional on edit */}
             <div className="space-y-1.5">
               <label className="flex items-center gap-1 text-xs font-semibold text-surface-600 dark:text-surface-400">
                 {lang(t.vehiclePlateNumber)}{" "}
-                <span className="font-normal text-surface-400 text-[10px]">
-                  ({lang(t.optional)})
-                </span>
+                {!isEditMode ? (
+                  <span className="text-error-500">*</span>
+                ) : (
+                  <span className="font-normal text-surface-400 text-[10px]">
+                    ({lang(t.optional)})
+                  </span>
+                )}
               </label>
               <input
                 type="text"
@@ -650,10 +731,37 @@ export const DriverFormPage: React.FC = () => {
                 onChange={(e) =>
                   handleChange("vehiclePlateNumber", e.target.value)
                 }
-                className={inputClasses("email")}
+                onBlur={() => handleBlur("vehiclePlateNumber")}
+                className={cn(
+                  inputClasses("vehiclePlateNumber", true),
+                  !isEditMode &&
+                    errors.vehiclePlateNumber &&
+                    touched.vehiclePlateNumber &&
+                    "border-error-400 dark:border-error-500",
+                )}
                 dir="ltr"
                 placeholder={lang(t.platePlaceholder)}
               />
+              {!isEditMode &&
+                errors.vehiclePlateNumber &&
+                touched.vehiclePlateNumber && (
+                  <p className="text-xs text-error-500 flex items-center gap-1">
+                    <svg
+                      className="w-3 h-3 flex-shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+                      />
+                    </svg>
+                    {errors.vehiclePlateNumber}
+                  </p>
+                )}
             </div>
           </div>
         </div>

@@ -649,15 +649,6 @@ export const ResetPasswordPage: React.FC = () => {
           </button>
         </div>
       </form>
-
-      <p className="mt-6 text-center text-sm text-surface-500 dark:text-surface-400">
-        <Link
-          to="/auth/login"
-          className="text-primary-600 dark:text-primary-400 hover:underline font-medium"
-        >
-          {lang(t.backToLogin)}
-        </Link>
-      </p>
     </div>
   );
 };

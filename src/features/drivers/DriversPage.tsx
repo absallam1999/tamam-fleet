@@ -1,4 +1,5 @@
-import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLanguage } from "@/shared/hooks/useLanguage";
 import { cn } from "@shared/utils/cn";
 import { useDriversPage } from "@shared/hooks/useFleetDrivers";
@@ -16,7 +17,6 @@ const t = {
   searchPlaceholder: { ar: "بحث عن سائق...", en: "Search drivers..." },
   allStatuses: { ar: "جميع الحالات", en: "All Statuses" },
 
-  // Table
   driver: { ar: "السائق", en: "Driver" },
   phone: { ar: "الهاتف", en: "Phone" },
   vehicleType: { ar: "نوع المركبة", en: "Vehicle Type" },
@@ -26,50 +26,39 @@ const t = {
   trips: { ar: "الرحلات", en: "Trips" },
   actions: { ar: "إجراءات", en: "Actions" },
 
-  // Statuses
   available: { ar: "متاح", en: "Available" },
   on_trip: { ar: "في رحلة", en: "On Trip" },
   off_duty: { ar: "خارج الخدمة", en: "Off Duty" },
-  on_leave: { ar: "في إجازة", en: "On Leave" },
-  suspended: { ar: "موقوف", en: "Suspended" },
 
-  // Toggle
-  toggleAvailability: { ar: "تبديل الحالة", en: "Toggle Status" },
+  verified: { ar: "موثّق", en: "Verified" },
+  unverified: { ar: "غير موثّق", en: "Unverified" },
 
-  // Actions
   edit: { ar: "تعديل", en: "Edit" },
   viewDetails: { ar: "عرض التفاصيل", en: "View Details" },
 
-  // Empty
   noDrivers: { ar: "لا يوجد سائقين", en: "No drivers found" },
   noDriversDesc: {
     ar: "ابدأ بإضافة أول سائق إلى الأسطول",
     en: "Start by adding your first driver",
   },
 
-  // Pagination
   showing: { ar: "عرض", en: "Showing" },
   of: { ar: "من", en: "of" },
   results: { ar: "نتيجة", en: "results" },
   previous: { ar: "السابق", en: "Previous" },
   next: { ar: "التالي", en: "Next" },
 
-  // Loading
   loading: { ar: "جاري تحميل السائقين...", en: "Loading drivers..." },
   error: { ar: "فشل تحميل البيانات", en: "Failed to load data" },
   retry: { ar: "إعادة المحاولة", en: "Retry" },
   refresh: { ar: "تحديث", en: "Refresh" },
 
-  // Stats
   availableCount: { ar: "متاح", en: "Available" },
   onTripCount: { ar: "في رحلة", en: "On Trip" },
   offDutyCount: { ar: "خارج الخدمة", en: "Off Duty" },
   totalDrivers: { ar: "إجمالي السائقين", en: "Total Drivers" },
 };
 
-// ============================================
-// Status Config
-// ============================================
 const getStatusConfig = (isAr: boolean) => ({
   available: {
     label: isAr ? t.available.ar : t.available.en,
@@ -89,18 +78,6 @@ const getStatusConfig = (isAr: boolean) => ({
       "bg-surface-100 text-surface-600 border-surface-200 dark:bg-surface-800 dark:text-surface-400 dark:border-surface-700",
     dot: "bg-surface-400",
   },
-  on_leave: {
-    label: isAr ? t.on_leave.ar : t.on_leave.en,
-    className:
-      "bg-warning-50 text-warning-700 border-warning-200 dark:bg-warning-500/10 dark:text-warning-400 dark:border-warning-500/20",
-    dot: "bg-warning-500",
-  },
-  suspended: {
-    label: isAr ? t.suspended.ar : t.suspended.en,
-    className:
-      "bg-error-50 text-error-700 border-error-200 dark:bg-error-500/10 dark:text-error-400 dark:border-error-500/20",
-    dot: "bg-error-500",
-  },
 });
 
 // ============================================
@@ -108,6 +85,7 @@ const getStatusConfig = (isAr: boolean) => ({
 // ============================================
 export const DriversPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentLanguage } = useLanguage();
   const isAr = currentLanguage === "ar";
   const lang = (obj: { ar: string; en: string }) => (isAr ? obj.ar : obj.en);
@@ -128,8 +106,31 @@ export const DriversPage: React.FC = () => {
     handleStatusFilter,
     handleOpenCreate,
     handleOpenEdit,
-    handleToggleAvailability,
   } = useDriversPage();
+
+  const urlSearch = searchParams.get("search") ?? "";
+  useEffect(() => {
+    if (urlSearch !== search) {
+      handleSearch(urlSearch);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearch]);
+
+  useEffect(() => {
+    const currentUrlSearch = searchParams.get("search") ?? "";
+    if (search !== currentUrlSearch) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (search) next.set("search", search);
+          else next.delete("search");
+          return next;
+        },
+        { replace: true },
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const statusConfig = getStatusConfig(isAr);
   const statusOptions = [
@@ -137,11 +138,8 @@ export const DriversPage: React.FC = () => {
     { value: "available", label: isAr ? t.available.ar : t.available.en },
     { value: "on_trip", label: isAr ? t.on_trip.ar : t.on_trip.en },
     { value: "off_duty", label: isAr ? t.off_duty.ar : t.off_duty.en },
-    { value: "on_leave", label: isAr ? t.on_leave.ar : t.on_leave.en },
-    { value: "suspended", label: isAr ? t.suspended.ar : t.suspended.en },
   ];
 
-  // Stats computed from the full filtered list
   const availableCount = allFilteredDrivers.filter(
     (d) => d.status === "available",
   ).length;
@@ -347,6 +345,7 @@ export const DriversPage: React.FC = () => {
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
             placeholder={lang(t.searchPlaceholder)}
+            aria-label={lang(t.searchPlaceholder)}
             className={cn(
               "w-full rounded-xl py-2.5 bg-surface-100 dark:bg-surface-800 text-sm text-surface-900 dark:text-white placeholder:text-surface-400 border-2 border-transparent focus:outline-none focus:border-primary-500/50 transition-all",
               isAr ? "pr-10 pl-4" : "pl-10 pr-4",
@@ -445,9 +444,31 @@ export const DriversPage: React.FC = () => {
                       </span>
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-base font-semibold text-surface-900 dark:text-surface-100 truncate">
-                        {driver.fullName}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-semibold text-surface-900 dark:text-surface-100 truncate">
+                          {driver.fullName}
+                        </h3>
+                        {driver.isVerified && (
+                          <span
+                            className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary-500 text-white flex-shrink-0"
+                            title={lang(t.verified)}
+                          >
+                            <svg
+                              className="w-2.5 h-2.5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              strokeWidth={3}
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="m4.5 12.75 6 6 9-13.5"
+                              />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
                         <span
                           className="text-xs text-surface-500 dark:text-surface-400"
@@ -524,29 +545,11 @@ export const DriversPage: React.FC = () => {
                       {driver.totalTrips || 0} {lang(t.trips)}
                     </span>
                   </div>
+                  {/* Actions — only Edit remains (toggle removed) */}
                   <div
                     className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      onClick={() => handleToggleAvailability(driver.id)}
-                      className="p-2 rounded-xl text-surface-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:text-primary-400 dark:hover:bg-primary-500/10 transition-colors"
-                      title={lang(t.toggleAvailability)}
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={1.5}
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
-                        />
-                      </svg>
-                    </button>
                     <button
                       onClick={() => handleOpenEdit(driver)}
                       className="p-2 rounded-xl text-surface-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:text-primary-400 dark:hover:bg-primary-500/10 transition-colors"

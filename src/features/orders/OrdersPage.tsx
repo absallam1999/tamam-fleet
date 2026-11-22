@@ -2,7 +2,7 @@ import { useLanguage } from "@/shared/hooks/useLanguage";
 import { useFleetOrders } from "@/shared/hooks/useFleetOrders";
 import { formatCurrency, getRelativeTime } from "@shared/utils/formatters";
 import { cn } from "@shared/utils/cn";
-import type { SupervisorOrderDto, DriverDto } from "@shared/types";
+import type { SupervisorOrderDto, DriverSupervisionDto } from "@shared/types";
 
 // ============================================
 // Translations
@@ -16,7 +16,7 @@ const t = {
   },
 
   // Tabs
-  tabPending: { ar: "طلبات معلقة", en: "Pending Orders" },
+  tabPending: { ar: "طلبات غير مسندة", en: "Unassigned Orders" },
   tabActive: { ar: "طلبات نشطة", en: "Active Orders" },
 
   // Table
@@ -29,14 +29,17 @@ const t = {
   time: { ar: "الوقت", en: "Time" },
   actions: { ar: "إجراءات", en: "Actions" },
 
-  // Statuses
-  pending: { ar: "قيد الانتظار", en: "Pending" },
-  accepted: { ar: "مقبول", en: "Accepted" },
-  preparing: { ar: "قيد التحضير", en: "Preparing" },
-  ready: { ar: "جاهز", en: "Ready" },
-  in_transit: { ar: "في الطريق", en: "In Transit" },
-  delivered: { ar: "تم التوصيل", en: "Delivered" },
-  cancelled: { ar: "ملغي", en: "Cancelled" },
+  // Real API order statuses
+  statusAssigned: { ar: "تم الإسناد", en: "Assigned" },
+  statusAccepted: { ar: "مقبول", en: "Accepted" },
+  statusArrivedAtStore: { ar: "وصل للمتجر", en: "Arrived at Store" },
+  statusReadyForPickup: { ar: "جاهز للاستلام", en: "Ready for Pickup" },
+  statusPickedUp: { ar: "تم الاستلام", en: "Picked Up" },
+  statusInTransit: { ar: "في الطريق", en: "In Transit" },
+  statusDelivered: { ar: "تم التوصيل", en: "Delivered" },
+  statusCancelled: { ar: "ملغي", en: "Cancelled" },
+  statusFailed: { ar: "فشل", en: "Failed" },
+  statusUnknown: { ar: "غير معروف", en: "Unknown" },
 
   // Actions
   assign: { ar: "تعيين", en: "Assign" },
@@ -63,13 +66,14 @@ const t = {
   cancel: { ar: "إلغاء", en: "Cancel" },
   noDrivers: { ar: "لا يوجد سائقين متاحين", en: "No available drivers" },
   dismiss: { ar: "إغلاق", en: "Dismiss" },
+  loadingDrivers: { ar: "جاري تحميل السائقين...", en: "Loading drivers..." },
 
   // Empty
-  noPending: { ar: "لا توجد طلبات معلقة", en: "No pending orders" },
+  noPending: { ar: "لا توجد طلبات غير مسندة", en: "No unassigned orders" },
   noActive: { ar: "لا توجد طلبات نشطة", en: "No active orders" },
   noPendingDesc: {
-    ar: "جميع الطلبات تمت معالجتها",
-    en: "All orders have been processed",
+    ar: "جميع الطلبات تم إسنادها لسائقين",
+    en: "All orders have been assigned to drivers",
   },
   noActiveDesc: {
     ar: "لا توجد طلبات قيد التوصيل حالياً",
@@ -77,72 +81,91 @@ const t = {
   },
 
   // Stats
-  pendingCount: { ar: "معلق", en: "pending" },
-  activeCount: { ar: "نشط", en: "active" },
+  pendingCount: { ar: "غير مسندة", en: "unassigned" },
+  activeCount: { ar: "نشطة", en: "active" },
   refresh: { ar: "تحديث", en: "Refresh" },
   error: { ar: "فشل تحميل البيانات", en: "Failed to load data" },
   retry: { ar: "إعادة المحاولة", en: "Retry" },
-};
+} as const;
 
 // ============================================
 // Status Config
 // ============================================
 
-const getOrderStatusConfig = (isAr: boolean) => ({
-  pending: {
-    label: isAr ? t.pending.ar : t.pending.en,
-    className:
-      "bg-warning-50 text-warning-700 border-warning-200 dark:bg-warning-500/10 dark:text-warning-400 dark:border-warning-500/20",
-    dot: "bg-warning-500",
-  },
-  accepted: {
-    label: isAr ? t.accepted.ar : t.accepted.en,
-    className:
-      "bg-info-50 text-info-700 border-info-200 dark:bg-info-500/10 dark:text-info-400 dark:border-info-500/20",
-    dot: "bg-info-500",
-  },
-  preparing: {
-    label: isAr ? t.preparing.ar : t.preparing.en,
-    className:
-      "bg-warning-50 text-warning-700 border-warning-200 dark:bg-warning-500/10 dark:text-warning-400 dark:border-warning-500/20",
-    dot: "bg-warning-500",
-  },
-  ready: {
-    label: isAr ? t.ready.ar : t.ready.en,
-    className:
-      "bg-success-50 text-success-700 border-success-200 dark:bg-success-500/10 dark:text-success-400 dark:border-success-500/20",
-    dot: "bg-success-500",
-  },
-  in_transit: {
-    label: isAr ? t.in_transit.ar : t.in_transit.en,
-    className:
-      "bg-primary-50 text-primary-700 border-primary-200 dark:bg-primary-500/10 dark:text-primary-400 dark:border-primary-500/20",
-    dot: "bg-primary-500",
-  },
-  delivered: {
-    label: isAr ? t.delivered.ar : t.delivered.en,
-    className:
-      "bg-success-50 text-success-700 border-success-200 dark:bg-success-500/10 dark:text-success-400 dark:border-success-500/20",
-    dot: "bg-success-500",
-  },
-  cancelled: {
-    label: isAr ? t.cancelled.ar : t.cancelled.en,
-    className:
-      "bg-error-50 text-error-700 border-error-200 dark:bg-error-500/10 dark:text-error-400 dark:border-error-500/20",
-    dot: "bg-error-500",
-  },
-});
+const getOrderStatusConfig = (isAr: boolean) => {
+  const tr = (key: keyof typeof t) => (isAr ? t[key].ar : t[key].en);
+  return {
+    Assigned: {
+      label: tr("statusAssigned"),
+      className:
+        "bg-info-50 text-info-700 border-info-200 dark:bg-info-500/10 dark:text-info-400 dark:border-info-500/20",
+      dot: "bg-info-500",
+    },
+    Accepted: {
+      label: tr("statusAccepted"),
+      className:
+        "bg-info-50 text-info-700 border-info-200 dark:bg-info-500/10 dark:text-info-400 dark:border-info-500/20",
+      dot: "bg-info-500",
+    },
+    ArrivedAtStore: {
+      label: tr("statusArrivedAtStore"),
+      className:
+        "bg-warning-50 text-warning-700 border-warning-200 dark:bg-warning-500/10 dark:text-warning-400 dark:border-warning-500/20",
+      dot: "bg-warning-500",
+    },
+    ReadyForPickup: {
+      label: tr("statusReadyForPickup"),
+      className:
+        "bg-warning-50 text-warning-700 border-warning-200 dark:bg-warning-500/10 dark:text-warning-400 dark:border-warning-500/20",
+      dot: "bg-warning-500",
+    },
+    PickedUp: {
+      label: tr("statusPickedUp"),
+      className:
+        "bg-primary-50 text-primary-700 border-primary-200 dark:bg-primary-500/10 dark:text-primary-400 dark:border-primary-500/20",
+      dot: "bg-primary-500",
+    },
+    InTransit: {
+      label: tr("statusInTransit"),
+      className:
+        "bg-primary-50 text-primary-700 border-primary-200 dark:bg-primary-500/10 dark:text-primary-400 dark:border-primary-500/20",
+      dot: "bg-primary-500",
+    },
+    Delivered: {
+      label: tr("statusDelivered"),
+      className:
+        "bg-success-50 text-success-700 border-success-200 dark:bg-success-500/10 dark:text-success-400 dark:border-success-500/20",
+      dot: "bg-success-500",
+    },
+    Cancelled: {
+      label: tr("statusCancelled"),
+      className:
+        "bg-error-50 text-error-700 border-error-200 dark:bg-error-500/10 dark:text-error-400 dark:border-error-500/20",
+      dot: "bg-error-500",
+    },
+    Failed: {
+      label: tr("statusFailed"),
+      className:
+        "bg-error-50 text-error-700 border-error-200 dark:bg-error-500/10 dark:text-error-400 dark:border-error-500/20",
+      dot: "bg-error-500",
+    },
+  } as Record<
+    string,
+    { label: string; className: string; dot: string }
+  >;
+};
 
 // ============================================
-// Assign/Reassign Modal (combined)
+// Assign/Reassign Modal
 // ============================================
 
 interface DriverSelectModalProps {
   order: SupervisorOrderDto;
-  drivers: DriverDto[];
+  drivers: DriverSupervisionDto[];
   selectedDriverId: string;
   notes: string;
   isSubmitting: boolean;
+  isLoadingDrivers?: boolean;
   isReassign?: boolean;
   onSelectDriver: (id: string) => void;
   onNotesChange: (notes: string) => void;
@@ -158,6 +181,7 @@ const DriverSelectModal: React.FC<DriverSelectModalProps> = ({
   selectedDriverId,
   notes,
   isSubmitting,
+  isLoadingDrivers = false,
   isReassign = false,
   onSelectDriver,
   onNotesChange,
@@ -205,7 +229,7 @@ const DriverSelectModal: React.FC<DriverSelectModalProps> = ({
               {lang(t.customer)}
             </span>
             <span className="text-sm font-medium text-surface-900 dark:text-surface-100">
-              {order.customerName}
+              {order.customerName || "—"}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -213,7 +237,7 @@ const DriverSelectModal: React.FC<DriverSelectModalProps> = ({
               {lang(t.store)}
             </span>
             <span className="text-sm font-medium text-surface-900 dark:text-surface-100">
-              {order.storeName}
+              {order.storeName || "—"}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -241,7 +265,30 @@ const DriverSelectModal: React.FC<DriverSelectModalProps> = ({
           <label className="block text-xs font-semibold text-surface-600 dark:text-surface-400">
             {lang(t.selectDriver)}
           </label>
-          {drivers.length === 0 ? (
+          {isLoadingDrivers ? (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400 text-sm">
+              <svg
+                className="w-4 h-4 animate-spin"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+              {lang(t.loadingDrivers)}
+            </div>
+          ) : drivers.length === 0 ? (
             <div className="flex items-center gap-2 p-3 rounded-xl bg-warning-50 dark:bg-warning-500/10 border border-warning-200 dark:border-warning-500/20 text-warning-700 dark:text-warning-400 text-sm">
               <svg
                 className="w-4 h-4 flex-shrink-0"
@@ -266,8 +313,9 @@ const DriverSelectModal: React.FC<DriverSelectModalProps> = ({
             >
               <option value="">{lang(t.selectDriver)}</option>
               {drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.fullName} {d.vehicleType ? `(${d.vehicleType})` : ""}
+                <option key={d.driverId} value={d.driverId}>
+                  {d.fullName}
+                  {d.vehicleType ? ` (${d.vehicleType})` : ""}
                 </option>
               ))}
             </select>
@@ -386,16 +434,13 @@ export const OrdersPage: React.FC = () => {
     handleCloseReassign,
     handleConfirmReassign,
     handleUnassign,
+    driversLoading,
+    unassignOrder
   } = useFleetOrders();
 
+  const unassignPending = unassignOrder.isPending;
   const orderStatusConfig = getOrderStatusConfig(isAr);
-  const orders = Array.isArray(
-    activeTab === "pending" ? pendingOrders : activeOrders,
-  )
-    ? activeTab === "pending"
-      ? pendingOrders
-      : activeOrders
-    : [];
+  const orders = activeTab === "pending" ? pendingOrders : activeOrders;
   const isLoading = activeTab === "pending" ? pendingLoading : activeLoading;
   const isError = activeTab === "pending" ? pendingError : activeError;
   const error = activeTab === "pending" ? pendingErr : activeErr;
@@ -500,7 +545,7 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
-      {/* Orders List - Card Layout */}
+      {/* Orders List */}
       <div className="space-y-3">
         {isLoading ? (
           Array.from({ length: 4 }, (_, i) => (
@@ -551,12 +596,11 @@ export const OrdersPage: React.FC = () => {
         ) : (
           orders.map((order) => {
             const sConfig =
-              orderStatusConfig[
-                order.status as keyof typeof orderStatusConfig
-              ] || orderStatusConfig.pending;
+              orderStatusConfig[order.status ?? ""] ??
+              orderStatusConfig.Assigned;
             return (
               <div
-                key={order.id}
+                key={order.orderId}
                 className="bg-white dark:bg-surface-900 rounded-2xl border border-surface-200 dark:border-surface-800 p-5 transition-all duration-200 hover:border-surface-300 dark:hover:border-surface-700 hover:shadow-md"
               >
                 <div className="flex flex-col lg:flex-row lg:items-center gap-4">
@@ -580,7 +624,7 @@ export const OrdersPage: React.FC = () => {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-mono text-sm font-bold text-surface-900 dark:text-surface-100">
-                          {order.orderNumber}
+                          {order.orderNumber ?? "—"}
                         </span>
                         <span
                           className={cn(
@@ -595,11 +639,11 @@ export const OrdersPage: React.FC = () => {
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-500 dark:text-surface-400">
-                        <span>{order.customerName}</span>
+                        <span>{order.customerName ?? "—"}</span>
                         <span className="text-surface-300 dark:text-surface-600">
                           •
                         </span>
-                        <span>{order.storeName}</span>
+                        <span>{order.storeName ?? "—"}</span>
                         {order.driverName && (
                           <>
                             <span className="text-surface-300 dark:text-surface-600">
@@ -627,7 +671,7 @@ export const OrdersPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Right: Amount + Time + Actions */}
+                  {/* Right: Amount + Actions */}
                   <div className="flex items-center gap-4 lg:gap-6 flex-shrink-0">
                     <div className="text-right">
                       <p className="text-sm font-bold text-surface-900 dark:text-surface-100">
@@ -664,12 +708,9 @@ export const OrdersPage: React.FC = () => {
                             {lang(t.reassign)}
                           </button>
                           <button
-                            onClick={() => {
-                              if (window.confirm(lang(t.unassignConfirm))) {
-                                handleUnassign(order.id);
-                              }
-                            }}
-                            className="px-4 py-2 rounded-xl text-xs font-semibold text-error-600 hover:bg-error-50 dark:text-error-400 dark:hover:bg-error-500/10 active:scale-[0.98] transition-all duration-200"
+                            onClick={() => handleUnassign(order.orderId)}
+                            disabled={unassignPending}
+                            className="px-4 py-2 rounded-xl text-xs font-semibold text-error-600 hover:bg-error-50 dark:text-error-400 dark:hover:bg-error-500/10 active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {lang(t.unassign)}
                           </button>
@@ -692,6 +733,7 @@ export const OrdersPage: React.FC = () => {
           selectedDriverId={selectedDriverId}
           notes={assignNotes}
           isSubmitting={assignOrder.isPending}
+          isLoadingDrivers={driversLoading}
           onSelectDriver={setSelectedDriverId}
           onNotesChange={setAssignNotes}
           onConfirm={handleConfirmAssign}
@@ -709,6 +751,7 @@ export const OrdersPage: React.FC = () => {
           selectedDriverId={reassignDriverId}
           notes={reassignNotes}
           isSubmitting={reassignOrder.isPending}
+          isLoadingDrivers={driversLoading}
           isReassign
           onSelectDriver={setReassignDriverId}
           onNotesChange={setReassignNotes}

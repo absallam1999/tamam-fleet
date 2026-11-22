@@ -629,12 +629,12 @@ export const DashboardHome: React.FC = () => {
                   ] || orderStatusConfig.pending;
                 return (
                   <div
-                    key={order.id}
+                    key={order.orderId}
                     onClick={() => navigate("/dashboard/orders")}
                     className="flex items-center gap-4 px-6 py-3.5 hover:bg-surface-50 dark:hover:bg-surface-800/30 transition-colors cursor-pointer group"
                   >
                     <span className="font-mono text-xs font-semibold text-surface-900 dark:text-surface-100 w-20 flex-shrink-0">
-                      {order.orderNumber || `#${order.id?.slice(0, 8) ?? ""}`}
+                      {order.orderNumber || `#${order.orderId?.slice(0, 8) ?? ""}`}
                     </span>
                     <span className="text-sm text-surface-700 dark:text-surface-300 flex-1 min-w-0 truncate">
                       {order.customerName}

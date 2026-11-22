@@ -1,82 +1,150 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ENDPOINTS } from "@/config/api";
+import type {
+  NotificationSummaryDto,
+  NotificationDto,
+  NotificationPayloadDto,
+  NotificationListQuery,
+  NotificationPreferencesDto,
+  UnreadCountDto,
+  MarkAllAsReadResultDto,
+  PagedResult,
+} from "@shared/types";
+
+// ============================================================
+// Query keys
+// ============================================================
 
 export const FLEET_NOTIFICATIONS_KEY = "fleet-notifications";
 export const FLEET_UNREAD_COUNT_KEY = "fleet-notifications-unread-count";
+export const FLEET_NOTIFICATION_PREFERENCES_KEY =
+  "fleet-notification-preferences";
+
+// ============================================================
+// UI-facing shape
+// ============================================================
 
 export interface FleetNotificationDto {
   id: string;
+
+  titleAr: string;
+  titleEn: string;
+  bodyAr: string;
+  bodyEn: string;
+
   title: string;
   body: string;
+
   type: string;
   isRead: boolean;
-  readAt: string | null;
-  dataJson: string | null;
   createdAt: string;
+  payload: NotificationPayloadDto | null;
   link?: string;
 }
 
-// ============================================================
-// Helper: Recursively extract array from various shapes
-// ============================================================
+export type NotificationLocale = "ar" | "en";
 
-function extractArray<T>(data: unknown): T[] {
-  if (Array.isArray(data)) return data as T[];
-
-  if (data && typeof data === "object") {
-    const obj = data as Record<string, unknown>;
-
-    if (Array.isArray(obj.items)) return obj.items as T[];
-    if (Array.isArray(obj.data)) return obj.data as T[];
-
-    // Nested: { data: { items: [] } } or { data: { data: [] } }
-    if (obj.data && typeof obj.data === "object") {
-      const inner = obj.data as Record<string, unknown>;
-      if (Array.isArray(inner.items)) return inner.items as T[];
-      if (Array.isArray(inner.data)) return inner.data as T[];
-    }
-    if (obj.items && typeof obj.items === "object") {
-      const inner = obj.items as Record<string, unknown>;
-      if (Array.isArray(inner.items)) return inner.items as T[];
-      if (Array.isArray(inner.data)) return inner.data as T[];
-    }
-  }
-
-  console.warn("Unexpected notification list shape:", data);
-  return [];
+export function localizeNotification(
+  n: Pick<FleetNotificationDto, "titleAr" | "titleEn" | "bodyAr" | "bodyEn">,
+  locale: NotificationLocale,
+): { title: string; body: string } {
+  return locale === "ar"
+    ? {
+        title: n.titleAr.trim() || n.titleEn,
+        body: n.bodyAr.trim() || n.bodyEn,
+      }
+    : {
+        title: n.titleEn.trim() || n.titleAr,
+        body: n.bodyEn.trim() || n.bodyAr,
+      };
 }
 
 // ============================================================
-// Helper: Parse dataJson to extract navigation link
+// Helpers
 // ============================================================
 
-function parseLink(dataJson: string | null): string | undefined {
-  if (!dataJson) return undefined;
-  try {
-    const parsed = JSON.parse(dataJson);
-    if (parsed.action === "navigate" && parsed.targetPage) {
-      const pageRoutes: Record<string, string> = {
-        Dashboard: "/dashboard",
-        Drivers: "/dashboard/drivers",
-        Orders: "/dashboard/orders",
-        Requests: "/dashboard/requests",
-        Wallet: "/dashboard/wallet",
-        Settings: "/dashboard/settings",
-        Notifications: "/dashboard/notifications",
-      };
-      return (
-        pageRoutes[parsed.targetPage] ||
-        `/dashboard/${parsed.targetPage.toLowerCase()}`
-      );
-    }
-    if (parsed.driverId) return `/dashboard/drivers/${parsed.driverId}`;
-    if (parsed.orderId) return `/dashboard/orders/${parsed.orderId}`;
-    if (parsed.url) return parsed.url;
-  } catch {
-    // Invalid JSON — ignore
+function extractItems<T>(data: PagedResult<T> | null | undefined): T[] {
+  if (!data) return [];
+  return data.items ?? [];
+}
+
+function pickLocalized(
+  ar: string | null | undefined,
+  en: string | null | undefined,
+): string {
+  if (ar && ar.trim()) return ar;
+  if (en && en.trim()) return en;
+  return "";
+}
+
+function deriveLink(
+  payload: NotificationPayloadDto | null | undefined,
+): string | undefined {
+  if (!payload) return undefined;
+
+  const action = payload.action?.toLowerCase();
+  const targetPage = payload.targetPage?.toLowerCase();
+
+  const pageRoutes: Record<string, string> = {
+    home: "/dashboard",
+    dashboard: "/dashboard",
+    drivers: "/dashboard/drivers",
+    orders: "/dashboard/orders",
+    ordertracking: "/dashboard/orders",
+    requests: "/dashboard/requests",
+    wallet: "/dashboard/wallet",
+    settings: "/dashboard/settings",
+    notifications: "/dashboard/notifications",
+  };
+
+  if (action === "navigate" && targetPage) {
+    return pageRoutes[targetPage] ?? `/dashboard/${targetPage}`;
   }
+
+  if (payload.targetId) {
+    if (targetPage === "drivers")
+      return `/dashboard/drivers/${payload.targetId}`;
+    if (targetPage === "orders" || targetPage === "ordertracking")
+      return `/dashboard/orders/${payload.targetId}`;
+  }
+
+  if (payload.extra) {
+    if (payload.extra.driverId)
+      return `/dashboard/drivers/${payload.extra.driverId}`;
+    if (payload.extra.orderId)
+      return `/dashboard/orders/${payload.extra.orderId}`;
+    if (payload.extra.conversationId)
+      return `/dashboard/chat/${payload.extra.conversationId}`;
+    if (payload.extra.url) return payload.extra.url;
+  }
+
   return undefined;
+}
+
+function toFleetNotification(dto: NotificationSummaryDto): FleetNotificationDto {
+  const titleAr = dto.titleAr ?? "";
+  const titleEn = dto.titleEn ?? "";
+  const bodyAr = dto.bodyAr ?? "";
+  const bodyEn = dto.bodyEn ?? "";
+
+  return {
+    id: dto.id,
+
+    titleAr,
+    titleEn,
+    bodyAr,
+    bodyEn,
+
+    title: pickLocalized(titleAr, titleEn),
+    body: pickLocalized(bodyAr, bodyEn),
+
+    type: dto.type ?? "",
+    isRead: dto.isRead,
+    createdAt: dto.createdAt,
+    payload: dto.payload ?? null,
+    link: deriveLink(dto.payload ?? null),
+  };
 }
 
 // ============================================================
@@ -84,80 +152,99 @@ function parseLink(dataJson: string | null): string | undefined {
 // ============================================================
 
 /**
- * Fetch fleet notifications with pagination.
- * Returns an array of notifications for the current page.
+ * Fetch notifications
  */
-export const useNotifications = (page = 1, pageSize = 20) => {
+export const useNotifications = (
+  pageIndex = 1,
+  pageSize = 20,
+  filters: Omit<NotificationListQuery, "pageIndex" | "pageSize"> = {},
+) => {
   return useQuery<FleetNotificationDto[]>({
-    queryKey: [FLEET_NOTIFICATIONS_KEY, page, pageSize],
+    queryKey: [FLEET_NOTIFICATIONS_KEY, pageIndex, pageSize, filters],
     queryFn: async () => {
-      const params = {
-        page: String(page),
-        pageSize: String(pageSize),
+      const params: Record<string, string | number | boolean> = {
+        pageIndex,
+        pageSize,
       };
-      const response = await apiClient.get<unknown>( // use unknown for flexible parsing
+      if (filters.Type) params.Type = filters.Type;
+      if (typeof filters.IsRead === "boolean") params.IsRead = filters.IsRead;
+      if (filters.From) params.From = filters.From;
+      if (filters.To) params.To = filters.To;
+
+      const response = await apiClient.get<unknown>(
         ENDPOINTS.NOTIFICATIONS.BASE,
         params,
       );
-      console.log("Notifications raw response:", response.data); // debug
 
-      const list = extractArray<FleetNotificationDto>(response.data);
-      // Add derived link to each notification
-      return list.map((n) => ({
-        ...n,
-        link: parseLink(n.dataJson),
-      }));
+      const page = response.data as PagedResult<NotificationSummaryDto> | null;
+      const items = extractItems<NotificationSummaryDto>(page);
+      return items.map(toFleetNotification);
     },
     staleTime: 30_000,
   });
 };
 
 /**
- * Fetch unread notification count.
- * Auto-refreshes every 30 seconds.
+ * Fetch a single notification.
+ */
+export const useNotification = (id: string | null | undefined) => {
+  return useQuery<NotificationDto>({
+    queryKey: [FLEET_NOTIFICATIONS_KEY, "detail", id],
+    queryFn: async () => {
+      const response = await apiClient.get<NotificationDto>(
+        ENDPOINTS.NOTIFICATIONS.BY_ID(id!),
+      );
+      return response.data;
+    },
+    enabled: !!id,
+  });
+};
+
+/**
+ * Fetch unread count.
  */
 export const useUnreadCount = () => {
-  return useQuery<{ count: number }>({
+  return useQuery<{ count: number; byType: Record<string, number> | null }>({
     queryKey: [FLEET_UNREAD_COUNT_KEY],
     queryFn: async () => {
-      const response = await apiClient.get<unknown>(
+      const response = await apiClient.get<UnreadCountDto>(
         ENDPOINTS.NOTIFICATIONS.UNREAD_COUNT,
       );
-      console.log("Unread count raw response:", response.data); // debug
-
-      // Try to extract count from various shapes
-      const data = response.data;
-      if (typeof data === "number") return { count: data };
-      if (data && typeof data === "object") {
-        const obj = data as Record<string, unknown>;
-        if (typeof obj.count === "number") return { count: obj.count };
-        if (typeof obj.unreadCount === "number")
-          return { count: obj.unreadCount };
-        // Maybe the count is inside data
-        if (obj.data && typeof obj.data === "object") {
-          const inner = obj.data as Record<string, unknown>;
-          if (typeof inner.count === "number") return { count: inner.count };
-          if (typeof inner.unreadCount === "number")
-            return { count: inner.unreadCount };
-        }
-      }
-      console.warn("Unexpected unread count shape:", data);
-      return { count: 0 };
+      return {
+        count: response.data?.total ?? 0,
+        byType: response.data?.byType ?? null,
+      };
     },
     staleTime: 15_000,
     refetchInterval: 30_000,
   });
 };
 
+/**
+ * Fetch notification preferences.
+ */
+export const useNotificationPreferences = () => {
+  return useQuery<NotificationPreferencesDto>({
+    queryKey: [FLEET_NOTIFICATION_PREFERENCES_KEY],
+    queryFn: async () => {
+      const response = await apiClient.get<NotificationPreferencesDto>(
+        ENDPOINTS.NOTIFICATIONS.PREFERENCES,
+      );
+      return response.data;
+    },
+    staleTime: 60_000,
+  });
+};
+
 // ============================================================
-// Mutations (unchanged)
+// Mutations
 // ============================================================
 
 export const useMarkAsRead = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (notificationId: string) => {
-      await apiClient.patch<void>(
+      await apiClient.post<void>(
         ENDPOINTS.NOTIFICATIONS.MARK_READ(notificationId),
       );
     },
@@ -170,9 +257,12 @@ export const useMarkAsRead = () => {
 
 export const useMarkAllAsRead = () => {
   const qc = useQueryClient();
-  return useMutation({
+  return useMutation<MarkAllAsReadResultDto>({
     mutationFn: async () => {
-      await apiClient.patch<void>(ENDPOINTS.NOTIFICATIONS.MARK_ALL_READ);
+      const response = await apiClient.post<MarkAllAsReadResultDto>(
+        ENDPOINTS.NOTIFICATIONS.MARK_ALL_READ,
+      );
+      return response.data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [FLEET_NOTIFICATIONS_KEY] });
@@ -186,7 +276,7 @@ export const useDeleteNotification = () => {
   return useMutation({
     mutationFn: async (notificationId: string) => {
       await apiClient.delete<void>(
-        ENDPOINTS.NOTIFICATIONS.DELETE(notificationId),
+        ENDPOINTS.NOTIFICATIONS.BY_ID(notificationId),
       );
     },
     onSuccess: () => {
@@ -196,15 +286,39 @@ export const useDeleteNotification = () => {
   });
 };
 
-export const useDeleteAllNotifications = () => {
+export const useDeleteNotifications = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      await apiClient.delete<void>(ENDPOINTS.NOTIFICATIONS.DELETE_ALL);
+    mutationFn: async (notificationIds: string[]) => {
+      await Promise.all(
+        notificationIds.map((id) =>
+          apiClient.delete<void>(ENDPOINTS.NOTIFICATIONS.BY_ID(id)),
+        ),
+      );
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [FLEET_NOTIFICATIONS_KEY] });
       qc.invalidateQueries({ queryKey: [FLEET_UNREAD_COUNT_KEY] });
+    },
+  });
+};
+
+export const useUpdateNotificationPreferences = () => {
+  const qc = useQueryClient();
+  return useMutation<
+    NotificationPreferencesDto,
+    Error,
+    Partial<NotificationPreferencesDto>
+  >({
+    mutationFn: async (prefs) => {
+      const response = await apiClient.put<NotificationPreferencesDto>(
+        ENDPOINTS.NOTIFICATIONS.PREFERENCES,
+        prefs,
+      );
+      return response.data;
+    },
+    onSuccess: (data) => {
+      qc.setQueryData([FLEET_NOTIFICATION_PREFERENCES_KEY], data);
     },
   });
 };

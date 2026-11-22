@@ -1,8 +1,13 @@
 import { useState } from "react";
-import { useWallet, useWithdraw } from "@shared/hooks/useFleetWallet";
+import {
+  useWallet,
+  useWithdraw,
+  useWithdrawals,
+  useWalletTransactions,
+} from "@shared/hooks/useFleetWallet";
 import { useLanguage } from "@/shared/hooks/useLanguage";
 import { useToast } from "@shared/components/Toaster";
-import { formatCurrency } from "@shared/utils/formatters";
+import { formatCurrency, formatTime } from "@shared/utils/formatters";
 import { cn } from "@shared/utils/cn";
 
 // ============================================
@@ -29,26 +34,127 @@ const t = {
   },
   withdrawError: { ar: "فشل طلب السحب", en: "Withdrawal request failed" },
   insufficientBalance: { ar: "رصيد غير كافي", en: "Insufficient balance" },
+  belowMinimum: {
+    ar: "المبلغ أقل من الحد الأدنى للسحب",
+    en: "Amount is below the minimum withdrawal",
+  },
   confirm: { ar: "تأكيد", en: "Confirm" },
   cancel: { ar: "إلغاء", en: "Cancel" },
 
   // Info
   walletInfo: { ar: "معلومات المحفظة", en: "Wallet Information" },
   balanceDescription: {
-    ar: "هذا هو رصيدك الحالي من عمولات توصيل الطلبات. يمكنك سحب رصيدك في أي وقت.",
-    en: "This is your current balance from delivery order commissions. You can withdraw your balance at any time.",
+    ar: "هذا هو رصيدك الحالي من عمولات إشراف الأسطول. يمكنك سحب رصيدك في أي وقت.",
+    en: "This is your current balance from fleet supervision commissions. You can withdraw your balance at any time.",
   },
 
   // Stats
   totalEarnings: { ar: "إجمالي الأرباح", en: "Total Earnings" },
+  totalWithdrawn: { ar: "إجمالي المسحوب", en: "Total Withdrawn" },
   availableBalance: { ar: "رصيد متاح", en: "Available Balance" },
   currency: { ar: "العملة", en: "Currency" },
   pendingWithdrawals: { ar: "طلبات سحب معلقة", en: "Pending Withdrawals" },
+  minimumWithdrawal: { ar: "الحد الأدنى للسحب", en: "Minimum Withdrawal" },
+  withdrawalRequests: { ar: "طلبات السحب", en: "Withdrawal Requests" },
+  noWithdrawals: {
+    ar: "لا توجد طلبات سحب",
+    en: "No withdrawal requests yet",
+  },
 
-  // Loading
-  loading: { ar: "جاري تحميل بيانات المحفظة...", en: "Loading wallet data..." },
+  // Transactions
+  recentTransactions: { ar: "المعاملات الأخيرة", en: "Recent Transactions" },
+  noTransactions: {
+    ar: "لا توجد معاملات بعد",
+    en: "No transactions yet",
+  },
+  viewAll: { ar: "عرض الكل", en: "View All" },
+  netBalance: { ar: "صافي الرصيد", en: "Net Balance" },
+
+  // Withdrawal statuses
+  statusPending: { ar: "قيد المعالجة", en: "Pending" },
+  statusCompleted: { ar: "مكتمل", en: "Completed" },
+  statusFailed: { ar: "فشل", en: "Failed" },
+  statusRejected: { ar: "مرفوض", en: "Rejected" },
+
+  // Loading / error
+  loading: {
+    ar: "جاري تحميل بيانات المحفظة...",
+    en: "Loading wallet data...",
+  },
   error: { ar: "فشل تحميل بيانات المحفظة", en: "Failed to load wallet data" },
   retry: { ar: "إعادة المحاولة", en: "Retry" },
+
+  // Withdraw disabled reasons
+  cannotWithdrawPending: {
+    ar: "لديك طلب سحب معلق بالفعل",
+    en: "You already have a pending withdrawal",
+  },
+  cannotWithdrawBelowMin: {
+    ar: "الرصيد أقل من الحد الأدنى للسحب",
+    en: "Balance is below the minimum withdrawal amount",
+  },
+} as const;
+
+// ============================================
+// Status Badge for Withdrawals
+// ============================================
+
+const WithdrawalStatusBadge: React.FC<{
+  status: string | null;
+  isAr: boolean;
+}> = ({ status, isAr }) => {
+  const key = (status ?? "").toLowerCase();
+
+  const config: Record<
+    string,
+    { bg: string; dot: string; label: { ar: string; en: string } }
+  > = {
+    pending: {
+      bg: "bg-warning-50 dark:bg-warning-500/10 text-warning-700 dark:text-warning-400 border-warning-200 dark:border-warning-500/20",
+      dot: "bg-warning-500",
+      label: t.statusPending,
+    },
+    completed: {
+      bg: "bg-success-50 dark:bg-success-500/10 text-success-700 dark:text-success-400 border-success-200 dark:border-success-500/20",
+      dot: "bg-success-500",
+      label: t.statusCompleted,
+    },
+    approved: {
+      bg: "bg-success-50 dark:bg-success-500/10 text-success-700 dark:text-success-400 border-success-200 dark:border-success-500/20",
+      dot: "bg-success-500",
+      label: t.statusCompleted,
+    },
+    failed: {
+      bg: "bg-error-50 dark:bg-error-500/10 text-error-700 dark:text-error-400 border-error-200 dark:border-error-500/20",
+      dot: "bg-error-500",
+      label: t.statusFailed,
+    },
+    rejected: {
+      bg: "bg-error-50 dark:bg-error-500/10 text-error-700 dark:text-error-400 border-error-200 dark:border-error-500/20",
+      dot: "bg-error-500",
+      label: t.statusRejected,
+    },
+  };
+
+  const c =
+    config[key] ??
+    ({
+      bg: "bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 border-surface-200 dark:border-surface-700",
+      dot: "bg-surface-400",
+      label: { ar: status ?? "-", en: status ?? "-" },
+    } as const);
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border",
+        c.bg,
+      )}
+    >
+      <span className={cn("w-1.5 h-1.5 rounded-full", c.dot)} />
+      {isAr ? c.label.ar : c.label.en}
+    </span>
+  );
 };
 
 // ============================================
@@ -62,6 +168,9 @@ interface WithdrawModalProps {
   isSubmitting: boolean;
   balance: number;
   currency: string;
+  minimumWithdrawalAmount: number;
+  pendingWithdrawalCount: number;
+  canRequestWithdrawal: boolean;
   isAr: boolean;
   lang: (obj: { ar: string; en: string }) => string;
 }
@@ -73,6 +182,9 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
   isSubmitting,
   balance,
   currency,
+  minimumWithdrawalAmount,
+  pendingWithdrawalCount,
+  canRequestWithdrawal,
   isAr,
   lang,
 }) => {
@@ -80,16 +192,25 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
 
   if (!isOpen) return null;
 
+  const amountValue = parseFloat(amount);
+  const aboveMin =
+    !isNaN(amountValue) && amountValue >= minimumWithdrawalAmount;
+  const withinBalance = !isNaN(amountValue) && amountValue <= balance;
+  const isValidAmount = aboveMin && withinBalance;
+
+  // Reasons the form is blocked (shown as a banner)
+  const blockReason = !canRequestWithdrawal
+    ? pendingWithdrawalCount > 0
+      ? lang(t.cannotWithdrawPending)
+      : lang(t.cannotWithdrawBelowMin)
+    : null;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const withdrawAmount = parseFloat(amount);
-    if (withdrawAmount > 0 && withdrawAmount <= balance) {
-      onConfirm(withdrawAmount);
+    if (isValidAmount && canRequestWithdrawal) {
+      onConfirm(amountValue);
     }
   };
-
-  const amountValue = parseFloat(amount);
-  const isValidAmount = amountValue > 0 && amountValue <= balance;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in">
@@ -143,17 +264,50 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          {/* Block reason banner */}
+          {blockReason && (
+            <div className="rounded-xl p-3 flex items-start gap-2 bg-warning-50 dark:bg-warning-500/10 border border-warning-200 dark:border-warning-500/20">
+              <svg
+                className="w-4 h-4 text-warning-600 dark:text-warning-400 flex-shrink-0 mt-0.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+                />
+              </svg>
+              <p className="text-xs text-warning-700 dark:text-warning-300 leading-relaxed">
+                {blockReason}
+              </p>
+            </div>
+          )}
+
           {/* Available Balance Card */}
-          <div className="rounded-2xl bg-surface-50 dark:bg-surface-800/50 p-4 flex items-center justify-between">
-            <span className="text-xs font-medium text-surface-500 dark:text-surface-400">
-              {isAr ? "الرصيد المتاح" : "Available Balance"}
-            </span>
-            <span className="text-sm font-semibold text-surface-900 dark:text-surface-100">
-              {formatCurrency(balance)}{" "}
-              <span className="text-xs font-normal text-surface-500">
-                {currency}
+          <div className="rounded-2xl bg-surface-50 dark:bg-surface-800/50 p-4 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-surface-500 dark:text-surface-400">
+                {isAr ? "الرصيد المتاح" : "Available Balance"}
               </span>
-            </span>
+              <span className="text-sm font-semibold text-surface-900 dark:text-surface-100">
+                {formatCurrency(balance)}{" "}
+                <span className="text-xs font-normal text-surface-500">
+                  {currency}
+                </span>
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-surface-500 dark:text-surface-400">
+                {lang(t.minimumWithdrawal)}
+              </span>
+              <span className="text-xs font-medium text-surface-600 dark:text-surface-400">
+                {formatCurrency(minimumWithdrawalAmount)}{" "}
+                <span className="text-[10px]">{currency}</span>
+              </span>
+            </div>
           </div>
 
           {/* Amount Input */}
@@ -167,10 +321,11 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder={lang(t.withdrawPlaceholder)}
                 type="number"
-                min="1"
+                min={minimumWithdrawalAmount || 1}
                 max={balance}
                 step="0.01"
                 required
+                disabled={!canRequestWithdrawal}
                 className={cn(
                   "w-full px-4 py-3.5 rounded-2xl text-base font-medium",
                   "bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-white",
@@ -179,26 +334,29 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
                   "focus:outline-none focus:border-primary-500/60 focus:bg-surface-50 dark:focus:bg-surface-800/60",
                   "transition-all duration-200",
                   isAr ? "text-right" : "text-left",
-                  !isValidAmount &&
-                    amount !== "" &&
+                  amount !== "" &&
+                    !isValidAmount &&
                     "border-error-400 dark:border-error-500",
+                  !canRequestWithdrawal && "opacity-60 cursor-not-allowed",
                 )}
                 dir="ltr"
               />
               <button
                 type="button"
                 onClick={() => setAmount(balance.toString())}
+                disabled={!canRequestWithdrawal}
                 className={cn(
                   "absolute top-1/2 -translate-y-1/2 px-3 py-1.5 text-xs font-semibold rounded-lg",
                   "bg-primary-100 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400",
                   "hover:bg-primary-200 dark:hover:bg-primary-500/20 transition-colors",
                   isAr ? "left-2" : "right-2",
+                  !canRequestWithdrawal && "opacity-50 cursor-not-allowed",
                 )}
               >
                 {isAr ? "الكل" : "Max"}
               </button>
             </div>
-            {!isValidAmount && amount !== "" && (
+            {amount !== "" && !isValidAmount && (
               <p className="text-xs text-error-500 flex items-center gap-1">
                 <svg
                   className="w-3.5 h-3.5 flex-shrink-0"
@@ -213,7 +371,11 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
                     d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
                   />
                 </svg>
-                {isAr ? "المبلغ غير صالح" : "Invalid amount"}
+                {!aboveMin
+                  ? lang(t.belowMinimum)
+                  : !withinBalance
+                    ? lang(t.insufficientBalance)
+                    : lang(t.belowMinimum)}
               </p>
             )}
           </div>
@@ -222,12 +384,17 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
           <div className="flex gap-2">
             {[25, 50, 75, 100].map((percent) => {
               const chipAmount = (balance * percent) / 100;
+              const disabled = !canRequestWithdrawal;
               return (
                 <button
                   key={percent}
                   type="button"
                   onClick={() => setAmount(chipAmount.toFixed(2))}
-                  className="flex-1 px-2 py-2 rounded-xl text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors"
+                  disabled={disabled}
+                  className={cn(
+                    "flex-1 px-2 py-2 rounded-xl text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors",
+                    disabled && "opacity-50 cursor-not-allowed",
+                  )}
                 >
                   {percent}%
                 </button>
@@ -239,7 +406,7 @@ const WithdrawModal: React.FC<WithdrawModalProps> = ({
           <div className="flex gap-3 pt-1">
             <button
               type="submit"
-              disabled={isSubmitting || !isValidAmount}
+              disabled={isSubmitting || !isValidAmount || !canRequestWithdrawal}
               className={cn(
                 "flex-1 px-4 py-3.5 rounded-2xl text-sm font-semibold transition-all duration-200",
                 "bg-primary-600 text-white hover:bg-primary-700 active:scale-[0.98]",
@@ -316,9 +483,35 @@ export const WalletPage: React.FC = () => {
   const isAr = currentLanguage === "ar";
   const lang = (obj: { ar: string; en: string }) => (isAr ? obj.ar : obj.en);
 
-  const { balance, currency, isLoading, isError, error, refetch } = useWallet();
-  const withdrawMutation = useWithdraw();
+  const {
+    balance,
+    currency,
+    totalIn,
+    totalOut,
+    pendingWithdrawalCount,
+    pendingWithdrawalAmount,
+    minimumWithdrawalAmount,
+    canRequestWithdrawal,
+    recentTransactions,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useWallet();
 
+  // Transaction history (full list, not just the 3 from wallet.recentTransactions)
+  const { data: allTransactions = [] } = useWalletTransactions({
+    pageIndex: 1,
+    pageSize: 10,
+  });
+
+  // Withdrawal requests history
+  const { data: withdrawals = [] } = useWithdrawals({
+    pageIndex: 1,
+    pageSize: 10,
+  });
+
+  const withdrawMutation = useWithdraw();
   const [showWithdraw, setShowWithdraw] = useState(false);
 
   const handleWithdraw = async (amount: number) => {
@@ -326,10 +519,17 @@ export const WalletPage: React.FC = () => {
       await withdrawMutation.mutateAsync(amount);
       toast.success(lang(t.withdrawSuccess));
       setShowWithdraw(false);
-    } catch {
-      toast.error(lang(t.withdrawError));
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : lang(t.withdrawError);
+      toast.error(message);
     }
   };
+
+  // Prefer the richer history from `useWalletTransactions`, fall back to
+  // the "recent" list embedded in the summary DTO if needed.
+  const transactions =
+    allTransactions.length > 0 ? allTransactions : recentTransactions;
 
   // ============================================
   // Loading State
@@ -355,8 +555,8 @@ export const WalletPage: React.FC = () => {
           <div className="glass p-8 space-y-4 rounded-3xl">
             <div className="skeleton h-4 w-28 rounded-lg" />
             <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="skeleton h-12 rounded-xl" />
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="skeleton h-14 rounded-xl" />
               ))}
             </div>
           </div>
@@ -399,6 +599,12 @@ export const WalletPage: React.FC = () => {
       </div>
     );
   }
+
+  // Disable withdraw button if backend says we can't
+  const withdrawDisabled =
+    !canRequestWithdrawal ||
+    balance < minimumWithdrawalAmount ||
+    withdrawMutation.isPending;
 
   // ============================================
   // Render
@@ -485,7 +691,14 @@ export const WalletPage: React.FC = () => {
                 </div>
                 <button
                   onClick={() => setShowWithdraw(true)}
-                  disabled={balance <= 0 || withdrawMutation.isPending}
+                  disabled={withdrawDisabled}
+                  title={
+                    !canRequestWithdrawal
+                      ? pendingWithdrawalCount > 0
+                        ? lang(t.cannotWithdrawPending)
+                        : lang(t.cannotWithdrawBelowMin)
+                      : undefined
+                  }
                   className={cn(
                     "px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200",
                     "bg-white text-primary-700 hover:bg-white/90 active:scale-[0.98]",
@@ -526,17 +739,29 @@ export const WalletPage: React.FC = () => {
               <p className="text-sm text-white/60 leading-relaxed max-w-lg">
                 {lang(t.balanceDescription)}
               </p>
+
+              {/* Pending withdrawal inline pill */}
+              {pendingWithdrawalCount > 0 && (
+                <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-warning-400 animate-pulse" />
+                  <span className="text-xs font-medium text-white/90">
+                    {pendingWithdrawalCount} {lang(t.pendingWithdrawals)} —{" "}
+                    {formatCurrency(pendingWithdrawalAmount)} {currency}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Right Column - Info Card */}
+        {/* Right Column - Stats Card */}
         <div className="bg-white dark:bg-surface-900 rounded-3xl border border-surface-200 dark:border-surface-800 p-6 shadow-sm h-fit">
           <h3 className="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-4">
             {lang(t.walletInfo)}
           </h3>
 
           <div className="space-y-3">
+            {/* Total Earnings (totalIn) */}
             <div className="flex items-center justify-between p-3.5 rounded-xl bg-surface-50 dark:bg-surface-800/50 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-success-100 dark:bg-success-900/30 flex items-center justify-center">
@@ -559,12 +784,16 @@ export const WalletPage: React.FC = () => {
                     {lang(t.totalEarnings)}
                   </p>
                   <p className="text-sm font-semibold text-surface-900 dark:text-surface-100">
-                    {formatCurrency(balance)}
+                    {formatCurrency(totalIn)}{" "}
+                    <span className="text-xs font-normal text-surface-500">
+                      {currency}
+                    </span>
                   </p>
                 </div>
               </div>
             </div>
 
+            {/* Total Withdrawn (totalOut) */}
             <div className="flex items-center justify-between p-3.5 rounded-xl bg-surface-50 dark:bg-surface-800/50 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
@@ -584,15 +813,19 @@ export const WalletPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs text-surface-500 dark:text-surface-400">
-                    {lang(t.availableBalance)}
+                    {lang(t.totalWithdrawn)}
                   </p>
                   <p className="text-sm font-semibold text-surface-900 dark:text-surface-100">
-                    {formatCurrency(balance)}
+                    {formatCurrency(totalOut)}{" "}
+                    <span className="text-xs font-normal text-surface-500">
+                      {currency}
+                    </span>
                   </p>
                 </div>
               </div>
             </div>
 
+            {/* Pending Withdrawals */}
             <div className="flex items-center justify-between p-3.5 rounded-xl bg-surface-50 dark:bg-surface-800/50 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-warning-100 dark:bg-warning-900/30 flex items-center justify-center">
@@ -612,16 +845,251 @@ export const WalletPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs text-surface-500 dark:text-surface-400">
-                    {lang(t.currency)}
+                    {lang(t.pendingWithdrawals)}
                   </p>
                   <p className="text-sm font-semibold text-surface-900 dark:text-surface-100">
-                    {currency}
+                    {pendingWithdrawalCount > 0
+                      ? `${formatCurrency(pendingWithdrawalAmount)} ${currency} (${pendingWithdrawalCount})`
+                      : isAr
+                        ? "لا يوجد"
+                        : "None"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Minimum Withdrawal */}
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-surface-50 dark:bg-surface-800/50 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-info-100 dark:bg-info-900/30 flex items-center justify-center">
+                  <svg
+                    className="w-5 h-5 text-info-600 dark:text-info-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs text-surface-500 dark:text-surface-400">
+                    {lang(t.minimumWithdrawal)}
+                  </p>
+                  <p className="text-sm font-semibold text-surface-900 dark:text-surface-100">
+                    {formatCurrency(minimumWithdrawalAmount)}{" "}
+                    <span className="text-xs font-normal text-surface-500">
+                      {currency}
+                    </span>
                   </p>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Recent Transactions */}
+      <div className="bg-white dark:bg-surface-900 rounded-3xl border border-surface-200 dark:border-surface-800 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-800">
+          <h3 className="text-lg font-semibold text-surface-900 dark:text-surface-100">
+            {lang(t.recentTransactions)}
+          </h3>
+          <span className="text-xs font-medium text-surface-500 dark:text-surface-400">
+            {transactions.length}
+          </span>
+        </div>
+
+        {transactions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-14 h-14 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-3">
+              <svg
+                className="w-7 h-7 text-surface-300 dark:text-surface-600"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1}
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
+                />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-surface-500 dark:text-surface-400">
+              {lang(t.noTransactions)}
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-surface-100 dark:divide-surface-800/30">
+            {transactions.map((tx) => {
+              const isCredit = tx.amount >= 0;
+              return (
+                <div
+                  key={tx.id}
+                  className="flex items-center gap-4 px-6 py-3.5 hover:bg-surface-50 dark:hover:bg-surface-800/30 transition-colors"
+                >
+                  <div
+                    className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                      isCredit
+                        ? "bg-success-100 dark:bg-success-500/10 text-success-600 dark:text-success-400"
+                        : "bg-warning-100 dark:bg-warning-500/10 text-warning-600 dark:text-warning-400",
+                    )}
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d={
+                          isCredit
+                            ? "M12 4.5v15m0-15 4.5 4.5M12 4.5 7.5 9"
+                            : "M12 19.5v-15m0 15 4.5-4.5M12 19.5 7.5 15"
+                        }
+                      />
+                    </svg>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+                      {tx.description ??
+                        tx.type ??
+                        (isAr ? "معاملة" : "Transaction")}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-surface-500 dark:text-surface-400">
+                      <span>{formatTime(tx.createdAt)}</span>
+                      {tx.orderNumber && (
+                        <>
+                          <span className="text-surface-300 dark:text-surface-600">
+                            •
+                          </span>
+                          <span dir="ltr">#{tx.orderNumber}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-end flex-shrink-0">
+                    <p
+                      className={cn(
+                        "text-sm font-semibold tabular-nums",
+                        isCredit
+                          ? "text-success-600 dark:text-success-400"
+                          : "text-warning-600 dark:text-warning-400",
+                      )}
+                    >
+                      {isCredit ? "+" : ""}
+                      {formatCurrency(tx.amount)}{" "}
+                      <span className="text-xs font-normal">{currency}</span>
+                    </p>
+                    <p className="text-[10px] text-surface-400 dark:text-surface-500 tabular-nums">
+                      {isAr ? "الرصيد" : "Balance"}:{" "}
+                      {formatCurrency(tx.balanceAfter)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Withdrawal Requests */}
+      <div className="bg-white dark:bg-surface-900 rounded-3xl border border-surface-200 dark:border-surface-800 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-800">
+          <h3 className="text-lg font-semibold text-surface-900 dark:text-surface-100">
+            {lang(t.withdrawalRequests)}
+          </h3>
+          <span className="text-xs font-medium text-surface-500 dark:text-surface-400">
+            {withdrawals.length}
+          </span>
+        </div>
+
+        {withdrawals.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-14 h-14 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-3">
+              <svg
+                className="w-7 h-7 text-surface-300 dark:text-surface-600"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1}
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-surface-500 dark:text-surface-400">
+              {lang(t.noWithdrawals)}
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-surface-100 dark:divide-surface-800/30">
+            {withdrawals.map((w) => (
+              <div
+                key={w.id}
+                className="flex items-center gap-4 px-6 py-3.5 hover:bg-surface-50 dark:hover:bg-surface-800/30 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-primary-100 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                    />
+                  </svg>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                    {formatCurrency(w.amount)}{" "}
+                    <span className="text-xs font-normal text-surface-500">
+                      {currency}
+                    </span>
+                  </p>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-surface-500 dark:text-surface-400">
+                    <span>{formatTime(w.createdAt)}</span>
+                    {w.rejectionReason && (
+                      <>
+                        <span className="text-surface-300 dark:text-surface-600">
+                          •
+                        </span>
+                        <span
+                          className="text-error-500 dark:text-error-400 truncate"
+                          title={w.rejectionReason}
+                        >
+                          {w.rejectionReason}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <WithdrawalStatusBadge status={w.status} isAr={isAr} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Withdraw Modal */}
@@ -632,6 +1100,9 @@ export const WalletPage: React.FC = () => {
         isSubmitting={withdrawMutation.isPending}
         balance={balance}
         currency={currency}
+        minimumWithdrawalAmount={minimumWithdrawalAmount}
+        pendingWithdrawalCount={pendingWithdrawalCount}
+        canRequestWithdrawal={canRequestWithdrawal}
         isAr={isAr}
         lang={lang}
       />

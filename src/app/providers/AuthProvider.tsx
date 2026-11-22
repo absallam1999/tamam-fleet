@@ -14,9 +14,24 @@ import { ENDPOINTS, getApiUrl } from "@/config/api";
 // Types
 // ============================================
 
+export type UserRole =
+  | "Customer"
+  | "Driver"
+  | "StoreOwner"
+  | "Admin"
+  | "Supervisor";
+
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
+}
+
+export interface AreaSummary {
+  areaId: string;
+  areaName: string;
+  driverCount: number;
+  pendingOrders: number;
+  activeOrders: number;
 }
 
 export interface FleetSupervisor {
@@ -25,25 +40,50 @@ export interface FleetSupervisor {
   email: string;
   phoneNumber: string;
   isActive: boolean;
+  isVerified: boolean;
+  profilePictureUrl: string | null;
+  verifiedAt: string | null;
+  cityId: string | null;
+  cityAr: string | null;
+  cityEn: string | null;
+  areas: AreaSummary[];
+  role: UserRole;
   lastLogin: string;
+  createdAt?: string;
 }
 
 export interface LoginCredentials {
   phoneNumber: string;
   password: string;
-  role: number;
-  remember: boolean;
+  role?: UserRole;
+  remember?: boolean;
 }
 
 export interface SendOtpCredentials {
   phoneNumber: string;
-  role: number;
+  /** Defaults to "Supervisor". */
+  role?: UserRole;
 }
 
 export interface VerifyOtpCredentials {
   phoneNumber: string;
   code: string;
-  role: number;
+  /** Defaults to "Supervisor". */
+  role?: UserRole;
+}
+
+export interface RegisterSupervisorCredentials {
+  fullName: string;
+  phoneNumber: string;
+  email: string;
+  areaIds?: string[];
+  notes?: string;
+}
+
+export interface OnboardingSubmissionResult {
+  requestId: string;
+  status: string;
+  message: string;
 }
 
 interface AuthContextValue {
@@ -54,6 +94,10 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   sendOtp: (credentials: SendOtpCredentials) => Promise<void>;
   verifyOtp: (credentials: VerifyOtpCredentials) => Promise<boolean>;
+  register: (
+    credentials: RegisterSupervisorCredentials,
+  ) => Promise<OnboardingSubmissionResult>;
+  refreshProfile: () => Promise<void>;
   getAccessToken: () => string | null;
   refreshToken: () => Promise<string | null>;
   changePassword: (newPassword: string) => Promise<void>;
@@ -70,18 +114,40 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const ACCESS_TOKEN_KEY = "fleet-supervisor-access-token";
 const REFRESH_TOKEN_KEY = "fleet-supervisor-refresh-token";
 const USER_DATA_KEY = "fleet-supervisor-user-data";
+const DEFAULT_ROLE: UserRole = "Supervisor";
 
 // ============================================
-// Token Utilities
+// Error extraction
+// ============================================
+
+function extractErrorMessage(data: unknown, fallback: string): string {
+  if (!data) return fallback;
+  if (typeof data === "string") return data || fallback;
+  if (typeof data !== "object") return fallback;
+  const d = data as Record<string, unknown>;
+  if (typeof d.message === "string" && d.message) return d.message;
+  if (typeof d.Message === "string" && d.Message) return d.Message;
+  if (typeof d.detail === "string" && d.detail) return d.detail;
+  if (typeof d.title === "string" && d.title) return d.title;
+  if (
+    Array.isArray(d.errors) &&
+    d.errors.length > 0 &&
+    typeof d.errors[0] === "string"
+  ) {
+    return d.errors[0];
+  }
+  return fallback;
+}
+
+// ============================================
+// Token & user storage
 // ============================================
 
 function getStoredTokens(): AuthTokens | null {
   try {
     const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    if (accessToken && refreshToken) {
-      return { accessToken, refreshToken };
-    }
+    if (accessToken && refreshToken) return { accessToken, refreshToken };
     return null;
   } catch {
     return null;
@@ -107,9 +173,25 @@ function getStoredUser(): FleetSupervisor | null {
   try {
     const raw = localStorage.getItem(USER_DATA_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as FleetSupervisor;
+    const parsed = JSON.parse(raw) as Partial<FleetSupervisor>;
     if (!parsed.id || !parsed.phoneNumber) return null;
-    return parsed;
+    return {
+      id: parsed.id,
+      fullName: parsed.fullName ?? "",
+      email: parsed.email ?? "",
+      phoneNumber: parsed.phoneNumber,
+      isActive: parsed.isActive ?? true,
+      isVerified: parsed.isVerified ?? false,
+      profilePictureUrl: parsed.profilePictureUrl ?? null,
+      verifiedAt: parsed.verifiedAt ?? null,
+      cityId: parsed.cityId ?? null,
+      cityAr: parsed.cityAr ?? null,
+      cityEn: parsed.cityEn ?? null,
+      areas: parsed.areas ?? [],
+      role: (parsed.role as UserRole) ?? DEFAULT_ROLE,
+      lastLogin: parsed.lastLogin ?? new Date().toISOString(),
+      createdAt: parsed.createdAt,
+    };
   } catch {
     return null;
   }
@@ -122,7 +204,7 @@ function storeUser(user: FleetSupervisor): void {
 }
 
 // ============================================
-// Token Extraction
+// Token / user builders
 // ============================================
 
 function extractTokens(
@@ -138,10 +220,6 @@ function extractTokens(
     token;
   return { accessToken: token, refreshToken };
 }
-
-// ============================================
-// Build FleetSupervisor
-// ============================================
 
 function buildFleetSupervisor(
   responseData: Record<string, unknown>,
@@ -167,12 +245,26 @@ function buildFleetSupervisor(
       existingUser?.phoneNumber ??
       "",
     isActive: (inner.isActive as boolean) ?? existingUser?.isActive ?? true,
+    isVerified:
+      (inner.isVerified as boolean) ?? existingUser?.isVerified ?? false,
+    profilePictureUrl:
+      (inner.profilePictureUrl as string) ??
+      existingUser?.profilePictureUrl ??
+      null,
+    verifiedAt:
+      (inner.verifiedAt as string) ?? existingUser?.verifiedAt ?? null,
+    cityId: (inner.cityId as string) ?? existingUser?.cityId ?? null,
+    cityAr: (inner.cityAr as string) ?? existingUser?.cityAr ?? null,
+    cityEn: (inner.cityEn as string) ?? existingUser?.cityEn ?? null,
+    areas: (inner.areas as AreaSummary[]) ?? existingUser?.areas ?? [],
+    role: (inner.role as UserRole) ?? existingUser?.role ?? DEFAULT_ROLE,
     lastLogin: new Date().toISOString(),
+    createdAt: (inner.createdAt as string) ?? existingUser?.createdAt,
   };
 }
 
 // ============================================
-// Session Validation
+// Session check
 // ============================================
 
 async function validateSession(accessToken: string): Promise<boolean> {
@@ -204,28 +296,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Track if a token refresh is in progress (prevents multiple refresh calls)
   const isRefreshing = useRef(false);
   const refreshPromise = useRef<Promise<string | null> | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
 
-  // ============================================
-  // Get current access token
-  // ============================================
   const getAccessToken = useCallback((): string | null => {
     const tokens = getStoredTokens();
     return tokens?.accessToken || null;
   }, []);
 
-  // ============================================
-  // Refresh Token — callable from api-client interceptor
-  // ============================================
+  // ---------- refresh token ----------
   const refreshToken = useCallback(async (): Promise<string | null> => {
     if (isRefreshing.current && refreshPromise.current) {
       return refreshPromise.current;
     }
-
     const tokens = getStoredTokens();
     if (!tokens?.refreshToken) return null;
 
@@ -240,19 +325,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             refreshToken: tokens.refreshToken,
           }),
         });
-
-        if (!response.ok) throw new Error("Token refresh failed");
-
+        if (!response.ok) throw new Error("refresh failed");
         const data = await response.json();
         const newTokens = extractTokens(data);
-
         if (newTokens) {
           storeTokens(newTokens);
           return newTokens.accessToken;
         }
         return null;
       } catch {
-        console.error("Token refresh failed");
         return null;
       } finally {
         isRefreshing.current = false;
@@ -263,77 +344,100 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return refreshPromise.current;
   }, []);
 
-  // ============================================
-  // Session Initialization
-  // ============================================
+  // ---------- refresh profile (GET /api/supervisor/profile) ----------
+  const refreshProfile = useCallback(async (): Promise<void> => {
+    const token = getStoredTokens()?.accessToken;
+    if (!token) return;
+    try {
+      const response = await fetch(getApiUrl(ENDPOINTS.SUPERVISOR.PROFILE), {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) return;
+      const json = await response.json().catch(() => null);
+      const profile = (json?.data as Record<string, unknown>) ?? null;
+      if (!profile) return;
+      setUser((prev) => {
+        if (!prev) return prev;
+        const updated: FleetSupervisor = {
+          ...prev,
+          id: (profile.id as string) ?? prev.id,
+          fullName: (profile.fullName as string) ?? prev.fullName,
+          email: (profile.email as string) ?? prev.email,
+          phoneNumber: (profile.phoneNumber as string) ?? prev.phoneNumber,
+          isVerified: (profile.isVerified as boolean) ?? prev.isVerified,
+          profilePictureUrl:
+            (profile.profilePictureUrl as string) ?? prev.profilePictureUrl,
+          verifiedAt: (profile.verifiedAt as string) ?? prev.verifiedAt,
+          cityId: (profile.cityId as string) ?? prev.cityId,
+          cityAr: (profile.cityAr as string) ?? prev.cityAr,
+          cityEn: (profile.cityEn as string) ?? prev.cityEn,
+          areas: (profile.areas as AreaSummary[]) ?? prev.areas,
+          createdAt: (profile.createdAt as string) ?? prev.createdAt,
+        };
+        storeUser(updated);
+        return updated;
+      });
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  // ---------- session init ----------
   useEffect(() => {
     const initSession = async (): Promise<void> => {
       const storedUser = getStoredUser();
       const storedTokens = getStoredTokens();
 
-      // If one exists without the other, clean up
       if ((storedUser && !storedTokens) || (!storedUser && storedTokens)) {
         clearTokens();
         setUser(null);
         setIsLoading(false);
         return;
       }
-
       if (!storedTokens) {
         setUser(null);
         setIsLoading(false);
         return;
       }
 
-      // Try to refresh the token on init
       try {
         const newToken = await refreshToken();
         if (!newToken) {
-          // Refresh failed, try to validate existing token
           const isValid = await validateSession(storedTokens.accessToken);
-          if (isValid) {
-            setUser(storedUser);
-          } else {
+          if (isValid) setUser(storedUser);
+          else {
             clearTokens();
             setUser(null);
           }
         } else {
-          // Token refreshed, keep user
           setUser(storedUser);
+          void refreshProfile();
         }
       } catch {
-        // Keep stored user even if refresh fails
         setUser(storedUser);
       }
-
       setIsLoading(false);
     };
-
     initSession();
   }, [refreshToken]);
 
-  // ============================================
-  // Periodic token refresh (every 10 minutes)
-  // ============================================
+  // ---------- periodic refresh ----------
   useEffect(() => {
     if (!user) return;
-
     const interval = setInterval(
       async () => {
         const newToken = await refreshToken();
-        if (!newToken) {
-          console.warn("Periodic token refresh failed");
-        }
+        if (!newToken) console.warn("Periodic token refresh failed");
       },
       10 * 60 * 1000,
     );
-
     return () => clearInterval(interval);
   }, [user, refreshToken]);
 
-  // ============================================
-  // LOGIN
-  // ============================================
+  // ---------- login ----------
   const login = useCallback(
     async (credentials: LoginCredentials): Promise<void> => {
       setError(null);
@@ -344,18 +448,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         body: JSON.stringify({
           phoneNumber: credentials.phoneNumber.trim(),
           password: credentials.password,
-          role: credentials.role,
+          role: credentials.role ?? DEFAULT_ROLE,
         }),
       });
 
       const responseData = await response.json().catch(() => null);
 
-      if (!response.ok) {
-        const message =
-          responseData?.Message ||
-          responseData?.message ||
-          responseData?.title ||
-          "فشل تسجيل الدخول";
+      if (!response.ok || (responseData && responseData.success === false)) {
+        const message = extractErrorMessage(responseData, "فشل تسجيل الدخول");
         setError(message);
         throw new Error(message);
       }
@@ -374,13 +474,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       );
       storeUser(newUser);
       setUser(newUser);
+
+      void refreshProfile();
     },
-    [],
+    [refreshProfile],
   );
 
-  // ============================================
-  // LOGOUT
-  // ============================================
+  // ---------- logout ----------
   const logout = useCallback(async (): Promise<void> => {
     try {
       const tokens = getStoredTokens();
@@ -401,9 +501,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  // ============================================
-  // SEND OTP
-  // ============================================
+  // ---------- send OTP ----------
   const sendOtp = useCallback(
     async (credentials: SendOtpCredentials): Promise<void> => {
       setError(null);
@@ -412,17 +510,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phoneNumber: credentials.phoneNumber.trim(),
-          role: credentials.role,
+          role: credentials.role ?? DEFAULT_ROLE,
         }),
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        const message =
-          errorData?.Message ||
-          errorData?.message ||
-          errorData?.title ||
-          "فشل إرسال رمز التحقق";
+        const message = extractErrorMessage(errorData, "فشل إرسال رمز التحقق");
         setError(message);
         throw new Error(message);
       }
@@ -430,35 +523,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     [],
   );
 
-  // ============================================
-  // VERIFY OTP
-  // ============================================
+  // ---------- verify OTP ----------
   const verifyOtp = useCallback(
     async (credentials: VerifyOtpCredentials): Promise<boolean> => {
       setError(null);
-
       const response = await fetch(getApiUrl(ENDPOINTS.AUTH.VERIFY_OTP), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phoneNumber: credentials.phoneNumber.trim(),
           code: credentials.code,
-          role: credentials.role,
+          role: credentials.role ?? DEFAULT_ROLE,
         }),
       });
-
       const responseData = await response.json().catch(() => null);
-
       if (!response.ok) {
-        const message =
-          responseData?.Message ||
-          responseData?.message ||
-          responseData?.title ||
-          "فشل التحقق من الرمز";
+        const message = extractErrorMessage(
+          responseData,
+          "فشل التحقق من الرمز",
+        );
         setError(message);
         throw new Error(message);
       }
-
       if (responseData) {
         const tokens = extractTokens(responseData);
         if (tokens) {
@@ -469,56 +555,83 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           );
           storeUser(newUser);
           setUser(newUser);
+          void refreshProfile();
           return true;
         }
       }
-
       return true;
+    },
+    [refreshProfile],
+  );
+
+  // ---------- registerSupervisor ----------
+  const register = useCallback(
+    async (
+      credentials: RegisterSupervisorCredentials,
+    ): Promise<OnboardingSubmissionResult> => {
+      setError(null);
+
+      const response = await fetch(getApiUrl(ENDPOINTS.AUTH.REGISTER), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: credentials.fullName.trim(),
+          phoneNumber: credentials.phoneNumber.trim(),
+          email: credentials.email.trim(),
+          areaIds: credentials.areaIds,
+          notes: credentials.notes?.trim() || undefined,
+        }),
+      });
+
+      const responseData = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const message = extractErrorMessage(
+          responseData,
+          "فشل إرسال طلب التسجيل",
+        );
+        setError(message);
+        throw new Error(message);
+      }
+
+      const result =
+        (responseData?.data as OnboardingSubmissionResult | undefined) ??
+        (responseData as OnboardingSubmissionResult | null);
+
+      if (!result) {
+        const message = "لم يتم استلام استجابة صحيحة من الخادم";
+        setError(message);
+        throw new Error(message);
+      }
+      return result;
     },
     [],
   );
 
-  // ============================================
-  // Change Password
-  // ============================================
-
+  // ---------- changePassword ----------
   const changePassword = useCallback(
     async (newPassword: string): Promise<void> => {
       setError(null);
-
       const token = getStoredTokens()?.accessToken;
-      if (!token) {
-        throw new Error("Unauthorized");
-      }
-
+      if (!token) throw new Error("Unauthorized");
       const response = await fetch(getApiUrl(ENDPOINTS.AUTH.CHANGE_PASSWORD), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ newPassword }),
+        body: JSON.stringify({ newPassword }), // AuthDtos.ChangePasswordDto
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        const message =
-          errorData?.Message ||
-          errorData?.message ||
-          errorData?.title ||
-          "فشل تغيير كلمة المرور";
+        const message = extractErrorMessage(errorData, "فشل تغيير كلمة المرور");
         setError(message);
         throw new Error(message);
       }
-
-      // Optionally update user session; no additional data required
     },
     [],
   );
 
-  // ============================================
-  // Derived State
-  // ============================================
   const isAuthenticated = user !== null;
 
   const contextValue = useMemo<AuthContextValue>(
@@ -530,6 +643,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       logout,
       sendOtp,
       verifyOtp,
+      register,
+      refreshProfile,
       getAccessToken,
       refreshToken,
       changePassword,
@@ -544,8 +659,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       logout,
       sendOtp,
       verifyOtp,
+      register,
+      refreshProfile,
       getAccessToken,
       refreshToken,
+      changePassword,
       error,
       clearError,
     ],

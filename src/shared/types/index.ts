@@ -2,299 +2,490 @@
 // Fleet Supervisor Types
 // ============================================================
 
-// ---------- Shared Pagination ----------
-export interface PaginationParams {
-  page?: number;
-  pageSize?: number;
-  sortBy?: string;
-  sortOrder?: "asc" | "desc";
-}
+// ---------- Envelope + pagination ----------
 
-export interface PaginatedResponse<T> {
-  items: T[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-  hasPreviousPage: boolean;
-  hasNextPage: boolean;
-}
-
-// ---------- API Response Wrapper ----------
-export interface ApiResponse<T> {
-  data: T;
+export interface ApiEnvelope<T> {
   success: boolean;
-  message?: string;
-  errors?: string[];
+  message: string | null;
+  data: T;
+  errors: string[];
 }
 
-export interface ApiErrorResponse {
-  success: false;
+export interface PagedResult<T> {
+  items: T[] | null;
+  pageIndex: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
+}
+
+// ---------- Roles ----------
+
+export type UserRole =
+  | "Customer"
+  | "Driver"
+  | "StoreOwner"
+  | "Admin"
+  | "Supervisor";
+
+// ============================================================
+// Auth
+// ============================================================
+
+export interface LoginDto {
+  phoneNumber: string;
+  password: string;
+  role: UserRole;
+}
+
+export interface SendOtpDto {
+  phoneNumber: string;
+  role: UserRole;
+}
+
+export interface VerifyOtpDto {
+  phoneNumber: string;
+  code: string;
+  role: UserRole;
+}
+
+export interface OtpSentResponseDto {
+  message: string | null;
+  expiresInSeconds: number;
+  code: string | null;
+}
+
+export interface AuthResponseDto {
+  userId: string;
+  phoneNumber: string | null;
+  fullName: string | null;
+  role: string | null;
+  token: string | null;
+  expiresAt: string;
+  refreshToken: string | null;
+  refreshTokenExpiresAt: string;
+  isActive: boolean;
+}
+
+export interface RefreshTokenDto {
+  token: string | null;
+  refreshToken: string | null;
+}
+
+export interface ChangePasswordDto {
+  newPassword: string | null;
+}
+
+export interface SubmitSupervisorOnboardingDto {
+  fullName: string;
+  phoneNumber: string;
+  email: string;
+  areaIds?: string[];
+  notes?: string;
+}
+
+export interface OnboardingSubmissionResultDto {
+  requestId: string;
+  status: string;
   message: string;
-  errors?: string[];
-  statusCode: number;
 }
 
-// ---------- Supervisor Profile ----------
+// ============================================================
+// Supervisor profile
+// ============================================================
+
 export interface SupervisorProfileDto {
   id: string;
-  fullName: string;
-  email: string;
-  phoneNumber: string;
-  isActive: boolean;
-  joinedDate: string;
-  lastLoginDate?: string;
-}
-
-export interface UpdateSupervisorProfileDto {
-  fullName?: string;
-  email?: string;
-  isActive?: boolean;
-}
-
-// ---------- Driver Management ----------
-export type DriverStatus =
-  | "available"
-  | "on_trip"
-  | "off_duty"
-  | "on_leave"
-  | "suspended";
-
-export interface DriverLocation {
-  latitude: number;
-  longitude: number;
-  lastUpdated: string;
-}
-
-export interface DriverDto {
-  id: string;
-  fullName: string;
-  email?: string;
-  phoneNumber: string;
-  vehicleType?: string;
-  vehiclePlateNumber?: string;
-  status: DriverStatus;
-  rating: number;
-  totalTrips: number;
-  completedTrips: number;
-  cancelledTrips: number;
-  onTimePercentage: number;
-  joinedDate: string;
-  lastActiveDate?: string;
-  currentLocation?: DriverLocation;
-}
-
-export interface DriverFilterParams extends PaginationParams {
-  status?: DriverStatus;
-  search?: string;
-}
-
-// ---------- Driver Creation / Update DTOs ----------
-export interface SupervisorCreateDriverDto {
-  phoneNumber: string;
-  fullName: string;
-  email?: string;
-  password?: string;
-  vehicleType?: string;
-  vehiclePlateNumber?: string;
-}
-
-export interface UpdateDriverDto {
-  fullName?: string;
-  email?: string;
-  vehicleType?: string;
-  vehiclePlateNumber?: string;
-}
-
-// ---------- Order Assignment ----------
-export type OrderStatus =
-  | "pending"
-  | "accepted"
-  | "preparing"
-  | "ready"
-  | "in_transit"
-  | "delivered"
-  | "cancelled";
-
-export interface SupervisorOrderDto {
-  id: string;
-  orderNumber: string;
-  customerName: string;
-  customerPhone: string;
-  storeName: string;
-  status: OrderStatus;
-  totalAmount: number;
-  deliveryFee: number;
-  driverId?: string;
-  driverName?: string;
-  specialInstructions?: string;
+  fullName: string | null;
+  phoneNumber: string | null;
+  email: string | null;
+  profilePictureUrl: string | null;
+  isVerified: boolean;
+  verifiedAt: string | null;
+  cityId: string | null;
+  cityAr: string | null;
+  cityEn: string | null;
+  areas: AreaSummaryDto[] | null;
   createdAt: string;
-
-  customerAddress?: string;
-  storeAddress?: string;
-  storeId?: string;
-  items?: OrderItemDto[];
 }
 
-export interface AssignOrderDto {
-  orderId: string;
-  driverId: string;
-  notes?: string;
+// ============================================================
+// Areas
+// ============================================================
+
+export interface AreaSummaryDto {
+  areaId: string;
+  areaName: string | null;
+  driverCount: number;
+  pendingOrders: number;
+  activeOrders: number;
 }
 
-export interface ReassignOrderDto {
-  driverId: string;
-  notes?: string;
-}
+// ============================================================
+// Dashboard
+// ============================================================
 
-export interface OrderFilterParams extends PaginationParams {
-  status?: OrderStatus;
-  search?: string;
-}
-
-export interface OrderItemDto {
-  productName: string;
-  quantity: number;
-  price: number;
-}
-
-// ---------- Driver Requests ----------
-export type DriverRequestStatus = "pending" | "approved" | "rejected";
-
-export interface DriverRequestDto {
-  id: string;
-  fullName: string;
-  phoneNumber: string;
-  email?: string;
-  vehicleType?: string;
-  vehiclePlateNumber?: string;
-  status: DriverRequestStatus;
-  createdAt: string;
-  city?: string;
-  address?: string;
-}
-
-export interface DriverRequestFilterParams extends PaginationParams {
-  status?: DriverRequestStatus;
-}
-
-export interface RejectDriverRequestDto {
-  reason: string;
-}
-
-// ---------- Supervisor Dashboard ----------
 export interface SupervisorDashboardDto {
   totalDrivers: number;
   onlineDrivers: number;
   pendingOrders: number;
   activeDeliveries: number;
   completedToday: number;
-  areas?: DashboardAreaDto[];
+  areas: AreaSummaryDto[] | null;
 }
 
-export interface DashboardAreaDto {
-  areaId: string;
-  areaName: string;
-  driverCount: number;
-  pendingOrders?: number;
-  activeOrders?: number;
+export interface DriverSupervisionDto {
+  driverId: string;
+  fullName: string;
+  phoneNumber: string;
+
+  isOnline: boolean;
+  isVerified: boolean;
+
+  currentLatitude: number;
+  currentLongitude: number;
+  rating: number;
+  totalDeliveries: number;
+  todayDeliveries: number;
+
+  activeOrderId: string | null;
+  activeOrderStatus: string | null;
+  lastLocationUpdateAt: string | null;
+
+  vehicleType: string | null;
+  vehiclePlateNumber: string | null;
+
+  cityId: string | null;
+  cityAr: string | null;
+  cityEn: string | null;
 }
 
-// ---------- Supervisor Wallet ----------
-export interface SupervisorWalletDto {
-  walletBalance: number;
-  currency?: string;
+// ---------- Driver query params ----------
+
+export interface SupervisorDriverFilterDto {
+  IsOnline?: boolean;
+  IsAvailable?: boolean;
+  AreaId?: string;
+  Search?: string;
+  PageIndex?: number;
+  PageSize?: number;
 }
 
-export interface CreateWithdrawalDto {
-  amount: number;
-}
+// ---------- Driver create / update ----------
 
-export interface WalletTransaction {
-  id: string;
-  type: string;
-  amount: number;
-  description?: string;
-  createdAt: string;
-}
-
-// ---------- Support Tickets ----------
-export interface SupportTicketDto {
-  id: string;
-  subject: string;
-  status: string; // "Open" | "InProgress" | "Resolved" | "Closed"
-  priority: string; // "Low" | "Medium" | "High" | "Urgent"
-  createdAt: string;
-  updatedAt: string;
-  messages?: SupportMessageDto[];
-  lastMessage?: SupportMessageDto;
-}
-
-// ---------- Support Tickets ----------
-export interface SupportMessageDto {
-  id: string;
-  ticketId: string;
-  content: string;
-  senderType?: string;
-  senderName?: string;
-  userType?: string; // "Fleet" | "Support" | "Store" etc.
-  userName?: string;
-  createdAt: string;
-  attachmentUrl?: string;
-}
-
-export interface CreateSupportTicketDto {
-  subject: string;
-  message: string;
-  priority: string;
-  orderId?: string | null;
-}
-
-export interface SendSupportMessageDto {
-  ticketId: string;
-  content: string;
-  attachmentUrl?: string;
-}
-
-// ---------- Notifications ----------
-export interface NotificationDto {
-  id: string;
-  title: string;
-  body: string;
-  type: string;
-  isRead: boolean;
-  readAt: string | null;
-  dataJson: string | null;
-  createdAt: string;
-}
-
-export interface NotificationFilterParams extends PaginationParams {
-  isRead?: boolean;
-}
-
-// ---------- Shared Auth Types ----------
-export interface LoginCredentials {
+export interface SupervisorCreateDriverDto {
+  fullName: string;
   phoneNumber: string;
   password: string;
-  role: number; // UserRole enum from API (0-4)
+
+  email?: string | null;
+  profilePictureUrl?: string | null;
+
+  vehicleType: string;
+  vehiclePlateNumber: string;
+
+  cityId?: string | null;
 }
 
-export interface SendOtpCredentials {
-  phoneNumber: string;
-  role: number;
+export interface SupervisorUpdateDriverDto {
+  fullName?: string | null;
+  email?: string | null;
+  profilePictureUrl?: string | null;
+  vehicleType?: string | null;
+  vehiclePlateNumber?: string | null;
+  cityId?: string | null;
 }
 
-export interface VerifyOtpCredentials {
-  phoneNumber: string;
-  code: string;
-  role: number;
+// ---------- Derived driver "live" status ----------
+
+export type DriverLiveStatus = "on_trip" | "available" | "offline";
+
+export function deriveDriverStatus(d: DriverSupervisionDto): DriverLiveStatus {
+  if (d.activeOrderId) return "on_trip";
+  if (d.isOnline) return "available";
+  return "offline";
 }
 
-export interface ChangePasswordDto {
-  newPassword: string;
+// ============================================================
+// Orders
+// ============================================================
+
+export interface SupervisorOrderDto {
+  orderId: string;
+  orderNumber: string | null;
+  status: string | null;
+  storeName: string | null;
+  customerName: string | null;
+  deliveryAddress: string | null;
+  totalAmount: number;
+  driverId: string | null;
+  driverName: string | null;
+  areaId: string | null;
+  supervisorId: string | null;
+  createdAt: string;
 }
 
-export interface UpdateLocationDto {
-  latitude: number;
-  longitude: number;
+export const SUPERVISOR_ORDER_STATUS = {
+  Assigned: "Assigned",
+  Accepted: "Accepted",
+  ArrivedAtStore: "ArrivedAtStore",
+  ReadyForPickup: "ReadyForPickup",
+  PickedUp: "PickedUp",
+  InTransit: "InTransit",
+  Delivered: "Delivered",
+  Cancelled: "Cancelled",
+  Failed: "Failed",
+} as const;
+
+export type SupervisorOrderStatus =
+  (typeof SUPERVISOR_ORDER_STATUS)[keyof typeof SUPERVISOR_ORDER_STATUS];
+
+export interface AssignOrderDto {
+  orderId: string;
+  driverId: string;
+  notes: string | null;
+}
+
+export interface ReassignOrderDto {
+  driverId: string;
+  notes: string | null;
+}
+
+export interface SupervisorOrderListQuery {
+  Status?: string;
+  DriverId?: string;
+  AreaId?: string;
+  From?: string;
+  To?: string;
+  PageIndex?: number;
+  PageSize?: number;
+}
+
+// ============================================================
+// Wallet
+// ============================================================
+
+export interface WalletSummaryDto {
+  walletId: string;
+  balance: number;
+  totalIn: number;
+  totalOut: number;
+  currency: string | null;
+  minimumWithdrawalAmount: number;
+  canRequestWithdrawal: boolean;
+  pendingWithdrawalCount: number;
+  pendingWithdrawalAmount: number;
+  recentTransactions: WalletTransactionDto[] | null;
+}
+
+export interface WalletTransactionDto {
+  id: string;
+  type: string | null;
+  amount: number;
+  balanceAfter: number;
+  description: string | null;
+  orderId: string | null;
+  orderNumber: string | null;
+  referenceNumber: string | null;
+  createdAt: string;
+}
+
+export interface WithdrawalDto {
+  id: string;
+  amount: number;
+  status: string | null;
+  notes: string | null;
+  rejectionReason: string | null;
+  paymentReference: string | null;
+  processedAt: string | null;
+  createdAt: string;
+}
+
+export interface RequestWithdrawalDto {
+  amount: number;
+}
+
+export interface WalletTransactionListQuery {
+  Type?: string;
+  OrderId?: string;
+  From?: string;
+  To?: string;
+  PageIndex?: number;
+  PageSize?: number;
+}
+
+// ============================================================
+// Notifications
+// ============================================================
+
+export interface NotificationPayloadDto {
+  action: string | null;
+  targetPage: string | null;
+  targetId: string | null;
+  extra: Record<string, string> | null;
+}
+
+export interface NotificationSummaryDto {
+  id: string;
+  type: string | null;
+
+  titleAr: string;
+  titleEn: string;
+  bodyAr: string;
+  bodyEn: string;
+
+  payload: NotificationPayloadDto;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface NotificationDto {
+  id: string;
+  recipientId: string;
+  recipientType: string | null;
+  type: string | null;
+
+  titleAr: string;
+  titleEn: string;
+  bodyAr: string;
+  bodyEn: string;
+
+  payload: NotificationPayloadDto;
+  isRead: boolean;
+  readAt: string | null;
+  isSent: boolean;
+  sentAt: string | null;
+  isDelivered: boolean;
+  deliveredAt: string | null;
+  createdAt: string;
+}
+
+export interface UnreadCountDto {
+  total: number;
+  byType: Record<string, number> | null;
+}
+
+export interface NotificationPreferencesDto {
+  pushEnabled: boolean;
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  orderUpdates: boolean;
+  promotions: boolean;
+  chatMessages: boolean;
+  systemAlerts: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursFrom: string | null;
+  quietHoursTo: string | null;
+}
+
+export interface MarkAllAsReadResultDto {
+  countMarkedAsRead: number;
+  markedAt: string;
+}
+
+export interface NotificationListQuery {
+  Type?: string;
+  IsRead?: boolean;
+  From?: string;
+  To?: string;
+  pageIndex?: number;
+  pageSize?: number;
+}
+
+// ============================================================
+// Chat
+// ============================================================
+
+export type SenderType = "Customer" | "Store" | "Fleet" | "Driver" | "Admin";
+export type MessageType = "Text" | "Image" | "File" | "Voice";
+export type ChatStatus = "Open" | "Closed";
+
+export interface ConversationDto {
+  id: string;
+  participantId: string;
+  participantType?: SenderType;
+  participantName?: string;
+  participantProfilePictureUrl?: string;
+  adminId?: string;
+  adminName?: string;
+  orderId?: string;
+  orderNumber?: string;
+  status?: ChatStatus;
+  subject?: string;
+  createdAt: string;
+  lastMessageAt?: string;
+  messageCount: number;
+  unreadCount: number;
+  lastMessagePreview?: string;
+  lastMessageFrom?: string;
+}
+
+export interface ConversationListItemDto {
+  id: string;
+  participantId: string;
+  participantType?: SenderType;
+  participantName?: string;
+  participantProfilePictureUrl?: string;
+  adminId?: string;
+  adminName?: string;
+  orderId?: string;
+  orderNumber?: string;
+  status?: ChatStatus;
+  subject?: string;
+  unreadCount: number;
+  lastMessagePreview?: string;
+  lastMessageAt?: string;
+  createdAt: string;
+}
+
+export interface MessageDto {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderType?: SenderType;
+  messageType?: MessageType;
+  senderName?: string;
+  senderProfilePictureUrl?: string;
+  content?: string;
+  attachmentUrl?: string;
+  isRead: boolean;
+  readAt?: string;
+  createdAt: string;
+}
+
+export interface SendMessageDto {
+  content?: string;
+  attachmentUrl?: string;
+  messageType?: MessageType;
+}
+
+export interface CreateConversationDto {
+  subject?: string;
+  orderId?: string;
+  firstMessage?: string;
+}
+
+// ============================================================
+// Files
+// ============================================================
+
+export interface FileUploadResultDto {
+  url: string | null;
+  relativePath: string | null;
+  fileName: string | null;
+  sizeInBytes: number;
+  contentType: string | null;
+}
+
+// ============================================================
+// Cities
+// ============================================================
+
+export interface CityListDto {
+  id: string;
+  nameAr: string | null;
+  nameEn: string | null;
+  isActive: boolean;
 }

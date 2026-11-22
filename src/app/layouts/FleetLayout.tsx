@@ -1,4 +1,11 @@
-import { Suspense, useState, useEffect, useRef, type ReactNode } from "react";
+import {
+  Suspense,
+  useState,
+  useEffect,
+  useRef,
+  type ReactNode,
+  useMemo,
+} from "react";
 import {
   Outlet,
   useLocation,
@@ -13,11 +20,16 @@ import { LanguageSwitcher } from "@shared/components/LanguageSwitcher";
 import { PageLoader } from "@shared/components/PageLoader";
 import { useToast } from "@shared/components/Toaster";
 import { cn } from "@shared/utils/cn";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
+import { ENDPOINTS } from "@/config/api";
+import type { DriverSupervisionDto } from "@shared/types";
 import { getRelativeTime } from "@shared/utils/formatters";
 import {
   useNotifications,
   useUnreadCount,
   useMarkAsRead,
+  localizeNotification,
 } from "@/shared/hooks/useFleetNotifications";
 import { useFleetOrders } from "@/shared/hooks/useFleetOrders";
 import { useDriverRequests } from "@/shared/hooks/useFleetRequests";
@@ -665,12 +677,101 @@ const Sidebar: React.FC<SidebarProps> = ({
 };
 
 // ============================================
-// Navbar
+// Searchable Routes
+// ============================================
+
+interface SearchableRoute {
+  to: string;
+  labelAr: string;
+  labelEn: string;
+  icon: ReactNode;
+  keywords: string[];
+}
+
+const searchableRoutes: SearchableRoute[] = [
+  {
+    to: "/dashboard",
+    labelAr: "لوحة التحكم",
+    labelEn: "Dashboard",
+    icon: mainNavItems[0].icon,
+    keywords: ["home", "main", "overview", "رئيسية"],
+  },
+  {
+    to: "/dashboard/orders",
+    labelAr: "الطلبات",
+    labelEn: "Orders",
+    icon: mainNavItems[1].icon,
+    keywords: ["order", "deliveries", "delivery", "توصيل"],
+  },
+  {
+    to: "/dashboard/drivers",
+    labelAr: "السائقين",
+    labelEn: "Drivers",
+    icon: mainNavItems[2].icon,
+    keywords: ["driver", "fleet", "سائق", "أسطول"],
+  },
+  {
+    to: "/dashboard/drivers/new",
+    labelAr: "إضافة سائق",
+    labelEn: "Add Driver",
+    icon: mainNavItems[3].icon,
+    keywords: ["new", "create", "add", "جديد", "إضافة"],
+  },
+  {
+    to: "/dashboard/requests",
+    labelAr: "طلبات الانضمام",
+    labelEn: "Requests",
+    icon: mainNavItems[4].icon,
+    keywords: ["join", "onboarding", "انضمام"],
+  },
+  {
+    to: "/dashboard/wallet",
+    labelAr: "المحفظة",
+    labelEn: "Wallet",
+    icon: mainNavItems[5].icon,
+    keywords: ["money", "balance", "earnings", "فلوس", "رصيد"],
+  },
+  {
+    to: "/dashboard/support",
+    labelAr: "الدعم الفني",
+    labelEn: "Support",
+    icon: mainNavItems[6].icon,
+    keywords: ["help", "chat", "support", "دعم", "مساعدة"],
+  },
+  {
+    to: "/dashboard/notifications",
+    labelAr: "الإشعارات",
+    labelEn: "Notifications",
+    icon: bottomNavItems[0].icon,
+    keywords: ["alerts", "تنبيهات"],
+  },
+  {
+    to: "/dashboard/reports",
+    labelAr: "التقارير",
+    labelEn: "Reports",
+    icon: bottomNavItems[1].icon,
+    keywords: ["analytics", "stats", "تحليلات", "إحصائيات"],
+  },
+  {
+    to: "/dashboard/settings",
+    labelAr: "الإعدادات",
+    labelEn: "Settings",
+    icon: bottomNavItems[2].icon,
+    keywords: ["config", "profile", "إعداد", "ملف"],
+  },
+];
+
+// ============================================
+// Navbar — Command palette search
 // ============================================
 
 interface NavbarProps {
   onMenuClick: () => void;
 }
+
+type CombinedResult =
+  | ({ type: "route" } & SearchableRoute)
+  | ({ type: "driver" } & DriverSupervisionDto);
 
 const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
   const { resolvedTheme, toggleTheme } = useTheme();
@@ -681,12 +782,18 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
   const toast = useToast();
   const isAr = currentLanguage === "ar";
 
+  // ── UI state ─────────────────────────────────────────────
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const { data: notificationsData } = useNotifications(1, 5);
   const { data: unreadData } = useUnreadCount();
@@ -694,6 +801,112 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
   const notifications = notificationsData ?? [];
   const unreadCount = unreadData?.count ?? 0;
 
+  // ── Debounce ─────────────────────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 200);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // ── Fetch ALL drivers once
+  const { data: allDrivers = [], isLoading: isDriversLoading } = useQuery<
+    DriverSupervisionDto[]
+  >({
+    queryKey: ["navbar-drivers-full-list"],
+    queryFn: async () => {
+      const response = await apiClient.get<unknown>(
+        ENDPOINTS.SUPERVISOR.DRIVERS,
+        { PageIndex: 1, PageSize: 1000 },
+      );
+      const raw = response.data;
+      const items =
+        raw && typeof raw === "object" && "items" in (raw as object)
+          ? ((raw as { items?: unknown[] }).items ?? [])
+          : Array.isArray(raw)
+            ? raw
+            : [];
+      return items as DriverSupervisionDto[];
+    },
+    staleTime: 30_000,
+  });
+
+  // ── Matching routes ─────────────────
+  const matchingRoutes = useMemo(() => {
+    const q = debouncedQuery.toLowerCase();
+    if (!q) return [];
+    return searchableRoutes
+      .filter((r) => {
+        const en = r.labelEn.toLowerCase();
+        const ar = r.labelAr.toLowerCase();
+        return (
+          en.includes(q) ||
+          ar.includes(q) ||
+          r.keywords.some((k) => k.toLowerCase().includes(q))
+        );
+      })
+      .slice(0, 5);
+  }, [debouncedQuery]);
+
+  // ── Matching drivers ──
+  const matchingDrivers = useMemo(() => {
+    const q = debouncedQuery.toLowerCase();
+    if (q.length < 2) return [];
+    return allDrivers
+      .filter((d) => {
+        const name = (d.fullName ?? "").toLowerCase();
+        const phone = d.phoneNumber ?? "";
+        const plate = (d.vehiclePlateNumber ?? "").toLowerCase();
+        return name.includes(q) || phone.includes(q) || plate.includes(q);
+      })
+      .slice(0, 5);
+  }, [allDrivers, debouncedQuery]);
+
+  // ── Combined list for keyboard nav ────────
+  const combinedResults = useMemo<CombinedResult[]>(
+    () => [
+      ...matchingRoutes.map((r) => ({ type: "route" as const, ...r })),
+      ...matchingDrivers.map((d) => ({ type: "driver" as const, ...d })),
+    ],
+    [matchingRoutes, matchingDrivers],
+  );
+
+  const hasAnyResults = combinedResults.length > 0;
+  const showDropdown = searchOpen && debouncedQuery.length >= 1;
+
+  // Reset highlight whenever results change
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [debouncedQuery]);
+
+  // ── Outside-click closes dropdown ────────────────────────
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(e.target as Node)
+      ) {
+        setSearchOpen(false);
+        setActiveIndex(-1);
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+
+  // ── ⌘K / Ctrl+K ──────────────────────────────────────────
+  useEffect(() => {
+    const handleShortcut = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  // ── Click-outside for user menu / notifications ──────────
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -715,6 +928,57 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
     logout();
     toast.success(isAr ? "تم تسجيل الخروج بنجاح" : "Logged out successfully");
     navigate("/auth/login");
+  };
+
+  // ── Commit a selection ─────────────────
+  const commitSelection = (item: CombinedResult) => {
+    if (item.type === "route") {
+      navigate(item.to);
+    } else {
+      navigate(`/dashboard/drivers/${item.driverId}`);
+    }
+    setSearchQuery("");
+    setSearchOpen(false);
+    setActiveIndex(-1);
+    searchInputRef.current?.blur();
+  };
+
+  // ── Fallback ────────
+  const handleSearchSubmit = () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    navigate(`/dashboard/drivers?search=${encodeURIComponent(q)}`);
+    setSearchQuery("");
+    setSearchOpen(false);
+    setActiveIndex(-1);
+    searchInputRef.current?.blur();
+  };
+
+  // ── Keyboard nav ─────────────────────────────────────────
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!searchOpen) setSearchOpen(true);
+      if (combinedResults.length > 0) {
+        setActiveIndex((i) => Math.min(i + 1, combinedResults.length - 1));
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, -1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0 && combinedResults[activeIndex]) {
+        commitSelection(combinedResults[activeIndex]);
+      } else {
+        handleSearchSubmit();
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setSearchQuery("");
+      setSearchOpen(false);
+      setActiveIndex(-1);
+      searchInputRef.current?.blur();
+    }
   };
 
   return (
@@ -748,10 +1012,10 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
         </button>
 
         {/* Search */}
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1 max-w-md" ref={searchContainerRef}>
           <svg
             className={cn(
-              "absolute top-1/2 -translate-y-1/2 w-4 h-4 transition-colors",
+              "absolute top-1/2 -translate-y-1/2 w-4 h-4 transition-colors z-10",
               isAr ? "right-3" : "left-3",
               searchFocused
                 ? "text-primary-500"
@@ -769,15 +1033,26 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
             />
           </svg>
           <input
+            ref={searchInputRef}
             data-search
             type="search"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setSearchFocused(true)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setSearchOpen(true);
+            }}
+            onFocus={() => {
+              setSearchFocused(true);
+              setSearchOpen(true);
+            }}
             onBlur={() => setSearchFocused(false)}
+            onKeyDown={handleSearchKeyDown}
             placeholder={
-              isAr ? "بحث عن سائق أو مركبة..." : "Search drivers or vehicles..."
+              isAr ? "ابحث عن صفحة أو سائق..." : "Search pages or drivers..."
             }
+            aria-label={isAr ? "بحث" : "Search"}
+            aria-autocomplete="list"
+            aria-expanded={showDropdown}
             className={cn(
               "w-full rounded-xl py-2 bg-surface-100 dark:bg-surface-800 text-sm",
               "text-surface-900 dark:text-surface-100 placeholder:text-surface-400 dark:placeholder:text-surface-500",
@@ -787,17 +1062,249 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
             )}
           />
           <kbd
+            onClick={() => searchInputRef.current?.focus()}
             className={cn(
               "absolute top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-surface-400 dark:text-surface-500 bg-surface-200 dark:bg-surface-700 rounded-md pointer-events-none select-none",
+              "cursor-pointer hover:text-surface-600 dark:hover:text-surface-300",
               isAr ? "left-3" : "right-3",
             )}
+            aria-hidden="true"
           >
             <span className="text-xs">⌘</span>K
           </kbd>
+
+          {/* Dropdown */}
+          {showDropdown && (
+            <div
+              onMouseDown={(e) => e.preventDefault()}
+              className={cn(
+                "absolute top-full mt-2 inset-x-0 z-50",
+                "rounded-2xl overflow-hidden",
+                "glass glass-elevated shadow-2xl shadow-black/10",
+                "animate-fade-in-scale origin-top",
+              )}
+              role="listbox"
+            >
+              {/* Loading */}
+              {isDriversLoading && !hasAnyResults ? (
+                <div className="px-4 py-6 flex items-center justify-center gap-2 text-sm text-surface-500 dark:text-surface-400">
+                  <svg
+                    className="w-4 h-4 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  {isAr ? "جاري البحث..." : "Searching..."}
+                </div>
+              ) : !hasAnyResults ? (
+                /* Empty state */
+                <div className="px-4 py-8 flex flex-col items-center gap-2 text-center">
+                  <div className="w-10 h-10 rounded-xl bg-surface-100 dark:bg-surface-800 flex items-center justify-center">
+                    <svg
+                      className="w-5 h-5 text-surface-400 dark:text-surface-500"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.5}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                      />
+                    </svg>
+                  </div>
+                  <p className="text-sm text-surface-500 dark:text-surface-400">
+                    {isAr
+                      ? `لا توجد نتائج لـ "${searchQuery}"`
+                      : `No results for "${searchQuery}"`}
+                  </p>
+                </div>
+              ) : (
+                <div className="max-h-96 overflow-y-auto" role="list">
+                  {/* ── Pages section ── */}
+                  {matchingRoutes.length > 0 && (
+                    <div>
+                      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500">
+                        {isAr ? "الصفحات" : "Pages"}
+                      </div>
+                      {matchingRoutes.map((r, idx) => {
+                        const isActive = idx === activeIndex;
+                        return (
+                          <button
+                            key={r.to}
+                            type="button"
+                            role="option"
+                            aria-selected={isActive}
+                            onMouseEnter={() => setActiveIndex(idx)}
+                            onClick={() =>
+                              commitSelection({ type: "route", ...r })
+                            }
+                            className={cn(
+                              "w-full text-start px-3 py-2 flex items-center gap-3 transition-colors",
+                              isActive
+                                ? "bg-primary-50 dark:bg-primary-950/30"
+                                : "hover:bg-surface-50 dark:hover:bg-surface-800/30",
+                            )}
+                          >
+                            <span className="w-8 h-8 rounded-lg bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 flex items-center justify-center flex-shrink-0">
+                              {r.icon}
+                            </span>
+                            <span className="flex-1 min-w-0 text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+                              {isAr ? r.labelAr : r.labelEn}
+                            </span>
+                            {isActive && (
+                              <kbd className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-medium text-surface-400 dark:text-surface-500 bg-surface-200 dark:bg-surface-700 rounded-md flex-shrink-0">
+                                ↵
+                              </kbd>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* ── Drivers section ── */}
+                  {matchingDrivers.length > 0 && (
+                    <div
+                      className={cn(
+                        matchingRoutes.length > 0 &&
+                          "border-t border-surface-200/50 dark:border-surface-800/50",
+                      )}
+                    >
+                      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500">
+                        {isAr ? "السائقين" : "Drivers"}
+                      </div>
+                      {matchingDrivers.map((d, idx) => {
+                        const combinedIdx = matchingRoutes.length + idx;
+                        const isActive = combinedIdx === activeIndex;
+                        return (
+                          <button
+                            key={d.driverId}
+                            type="button"
+                            role="option"
+                            aria-selected={isActive}
+                            onMouseEnter={() => setActiveIndex(combinedIdx)}
+                            onClick={() =>
+                              commitSelection({ type: "driver", ...d })
+                            }
+                            className={cn(
+                              "w-full text-start px-3 py-2 flex items-center gap-3 transition-colors",
+                              isActive
+                                ? "bg-primary-50 dark:bg-primary-950/30"
+                                : "hover:bg-surface-50 dark:hover:bg-surface-800/30",
+                            )}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 flex items-center justify-center flex-shrink-0 font-bold text-xs">
+                              {d.fullName?.charAt(0)?.toUpperCase() || "?"}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+                                  {d.fullName}
+                                </p>
+                                {d.isVerified && (
+                                  <span
+                                    className="inline-flex items-center justify-center w-3 h-3 rounded-full bg-primary-500 text-white flex-shrink-0"
+                                    title={isAr ? "موثّق" : "Verified"}
+                                  >
+                                    <svg
+                                      className="w-1.5 h-1.5"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      strokeWidth={4}
+                                      stroke="currentColor"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="m4.5 12.75 6 6 9-13.5"
+                                      />
+                                    </svg>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5 text-xs text-surface-500 dark:text-surface-400">
+                                <span dir="ltr">{d.phoneNumber}</span>
+                                {d.vehiclePlateNumber && (
+                                  <>
+                                    <span className="text-surface-300 dark:text-surface-600">
+                                      •
+                                    </span>
+                                    <span
+                                      dir="ltr"
+                                      className="font-mono truncate"
+                                    >
+                                      {d.vehiclePlateNumber}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            {isActive && (
+                              <kbd className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-medium text-surface-400 dark:text-surface-500 bg-surface-200 dark:bg-surface-700 rounded-md flex-shrink-0">
+                                ↵
+                              </kbd>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Footer — only shows when there IS a driver query (2+ chars) */}
+              {debouncedQuery.length >= 2 && (
+                <div className="border-t border-surface-200/50 dark:border-surface-800/50">
+                  <button
+                    type="button"
+                    onClick={handleSearchSubmit}
+                    className="w-full px-3 py-2.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-950/30 transition-colors flex items-center justify-between gap-2"
+                  >
+                    <span className="truncate">
+                      {isAr
+                        ? `عرض كل النتائج عن "${searchQuery}"`
+                        : `View all results for "${searchQuery}"`}
+                    </span>
+                    <svg
+                      className={cn(
+                        "w-3.5 h-3.5 flex-shrink-0",
+                        isAr && "scale-x-[-1]",
+                      )}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="m8.25 4.5 7.5 7.5-7.5 7.5"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Right section */}
+      {/* Right section  */}
       <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
         <LanguageSwitcher variant="minimal" className="sm:hidden" />
         <LanguageSwitcher variant="navbar" className="hidden sm:flex" />
@@ -956,70 +1463,80 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
                     </div>
                   ) : (
                     <div className="divide-y divide-surface-100 dark:divide-surface-800/30">
-                      {notifications.slice(0, 5).map((n) => (
-                        <button
-                          key={n.id}
-                          onClick={() => {
-                            if (!n.isRead) markAsRead.mutate(n.id);
-                            navigate("/dashboard/notifications");
-                            setNotificationsOpen(false);
-                          }}
-                          className={cn(
-                            "w-full text-start px-4 py-3 flex items-start gap-3 transition-colors",
-                            "hover:bg-surface-50 dark:hover:bg-surface-800/30",
-                            !n.isRead &&
-                              "bg-primary-50/40 dark:bg-primary-950/15",
-                            !n.isRead &&
-                              "border-s-2 border-primary-500 dark:border-primary-400",
-                          )}
-                        >
-                          <div
+                      {notifications.slice(0, 5).map((n) => {
+                        const { title, body } = localizeNotification(
+                          n,
+                          isAr ? "ar" : "en",
+                        );
+
+                        return (
+                          <button
+                            key={n.id}
+                            onClick={() => {
+                              if (!n.isRead) markAsRead.mutate(n.id);
+                              navigate("/dashboard/notifications");
+                              setNotificationsOpen(false);
+                            }}
                             className={cn(
-                              "w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0",
-                              n.isRead
-                                ? "bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400"
-                                : "bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400",
+                              "w-full text-start px-4 py-3 flex items-start gap-3 transition-colors",
+                              "hover:bg-surface-50 dark:hover:bg-surface-800/30",
+                              !n.isRead &&
+                                "bg-primary-50/40 dark:bg-primary-950/15",
+                              !n.isRead &&
+                                "border-s-2 border-primary-500 dark:border-primary-400",
                             )}
                           >
-                            <svg
-                              className="w-4.5 h-4.5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              strokeWidth={1.5}
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"
-                              />
-                            </svg>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2">
-                              <p
-                                className={cn(
-                                  "text-sm truncate",
-                                  n.isRead
-                                    ? "font-medium text-surface-700 dark:text-surface-300"
-                                    : "font-semibold text-surface-900 dark:text-surface-100",
-                                )}
-                              >
-                                {n.title}
-                              </p>
-                              {!n.isRead && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-primary-500 flex-shrink-0 mt-1.5 shadow-[0_0_6px_rgba(59,130,246,0.4)]" />
+                            <div
+                              className={cn(
+                                "w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0",
+                                n.isRead
+                                  ? "bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400"
+                                  : "bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400",
                               )}
+                            >
+                              <svg
+                                className="w-4.5 h-4.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                strokeWidth={1.5}
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"
+                                />
+                              </svg>
                             </div>
-                            <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5 line-clamp-2 leading-relaxed">
-                              {n.body}
-                            </p>
-                            <p className="text-[10px] text-surface-400 dark:text-surface-500 mt-1.5 font-medium">
-                              {getRelativeTime(n.createdAt)}
-                            </p>
-                          </div>
-                        </button>
-                      ))}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2">
+                                <p
+                                  className={cn(
+                                    "text-sm truncate",
+                                    n.isRead
+                                      ? "font-medium text-surface-700 dark:text-surface-300"
+                                      : "font-semibold text-surface-900 dark:text-surface-100",
+                                  )}
+                                >
+                                  {title}
+                                </p>
+                                {!n.isRead && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-primary-500 flex-shrink-0 mt-1.5 shadow-[0_0_6px_rgba(59,130,246,0.4)]" />
+                                )}
+                              </div>
+                              <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5 line-clamp-2 leading-relaxed">
+                                {body}
+                              </p>
+                              <p className="text-[10px] text-surface-400 dark:text-surface-500 mt-1.5 font-medium">
+                                {getRelativeTime(
+                                  n.createdAt,
+                                  isAr ? "ar" : "en",
+                                )}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

@@ -2,116 +2,121 @@
  * API Configuration — Tamam Fleet Dashboard
  */
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as
+  | string
+  | undefined;
 
 export const ENDPOINTS = {
   // ============================================
-  // Authentication (public)
+  // Authentication
   // ============================================
   AUTH: {
     LOGIN: "/api/auth/login",
-    SEND_OTP: "/api/auth/send-otp",
-    VERIFY_OTP: "/api/auth/verify-otp",
+    SEND_OTP: "/api/auth/otp/send",
+    VERIFY_OTP: "/api/auth/otp/verify",
+    REGISTER: "/api/onboarding/supervisor",
     REFRESH_TOKEN: "/api/auth/refresh",
     CHANGE_PASSWORD: "/api/auth/change-password",
     LOGOUT: "/api/auth/logout",
   },
 
   // ============================================
-  // Supervisor — Dashboard & Stats
+  // Supervisor
   // ============================================
   SUPERVISOR: {
+    PROFILE: "/api/supervisor/profile",
     DASHBOARD: "/api/supervisor/dashboard",
 
-    // ==========================================
-    // Driver Management
-    // ==========================================
-    DRIVERS: "/api/supervisor/drivers",
-    DRIVER_BY_ID: (driverId: string) => `/api/supervisor/drivers/${driverId}`,
-    TOGGLE_DRIVER_AVAILABILITY: (driverId: string) =>
-      `/api/supervisor/drivers/${driverId}/toggle-availability`,
-    CREATE_DRIVER: "/api/supervisor/create-driver",
-    UPDATE_DRIVER: (driverId: string) =>
-      `/api/supervisor/update-driver/${driverId}`,
+    AREAS: "/api/supervisor/areas",
+    AREA_BY_ID: (areaId: string) => `/api/supervisor/areas/${areaId}`,
 
-    // ==========================================
-    // Order Management
-    // ==========================================
-    ORDERS_PENDING: "/api/supervisor/orders/pending",
-    ORDERS_ACTIVE: "/api/supervisor/orders/active",
-    ASSIGN_ORDER: "/api/supervisor/assign-order",
+    DRIVERS: "/api/supervisor/drivers",
+    DRIVERS_AVAILABLE: "/api/supervisor/drivers/available",
+    DRIVER_BY_ID: (driverId: string) => `/api/supervisor/drivers/${driverId}`,
+    CREATE_DRIVER: "/api/supervisor/drivers",
+    UPDATE_DRIVER: (driverId: string) => `/api/supervisor/drivers/${driverId}`,
+
+    REQUESTS: "/api/supervisor/driver-requests",
+    REQUEST_BY_ID: (id: string) => `/api/supervisor/driver-requests/${id}`,
+    APPROVE_REQUEST: (id: string) =>
+      `/api/supervisor/driver-requests/${id}/approve`,
+    REJECT_REQUEST: (id: string) =>
+      `/api/supervisor/driver-requests/${id}/reject`,
+
+    ORDERS: "/api/supervisor/orders",
+    ORDERS_UNASSIGNED: "/api/supervisor/orders/unassigned",
+    ASSIGN_ORDER: "/api/supervisor/orders/assign",
     REASSIGN_ORDER: (orderId: string) =>
       `/api/supervisor/orders/${orderId}/reassign`,
     UNASSIGN_ORDER: (orderId: string) =>
-      `/api/supervisor/orders/${orderId}/unassign`,
-    SELF_ASSIGN_ORDER: (orderId: string) =>
-      `/api/supervisor/orders/${orderId}/self-assign`,
-
-    // ==========================================
-    // Driver Registration Requests
-    // ==========================================
-    DRIVER_REQUESTS: "/api/supervisor/driver-requests",
-    APPROVE_DRIVER_REQUEST: (id: string) =>
-      `/api/supervisor/driver-requests/${id}/approve`,
-    REJECT_DRIVER_REQUEST: (id: string) =>
-      `/api/supervisor/driver-requests/${id}/reject`,
-
-    // ==========================================
-    // Supervisor Wallet
-    // ==========================================
-    WALLET: "/api/supervisor/wallet",
-    WALLET_BALANCE: "/api/supervisor/wallet/balance",
-    WALLET_WITHDRAW: "/api/supervisor/wallet/withdraw",
+      `/api/supervisor/orders/${orderId}/assign`,
   },
 
   // ============================================
-  // Driver Delivery Operations
+  // Wallet
   // ============================================
-  DRIVER: {
-    DASHBOARD: "/api/driver/dashboard",
-    EARNINGS: "/api/driver/earnings",
-    AVAILABLE_ORDERS: "/api/driver/available-orders",
-    ORDER_BY_ID: (orderId: string) => `/api/driver/orders/${orderId}`,
-    ACCEPT_ORDER: "/api/driver/accept-order",
-    UPDATE_DELIVERY_STATUS: "/api/driver/update-delivery-status",
-    ORDER_HISTORY: "/api/driver/order-history",
-    GO_ONLINE: "/api/driver/go-online",
-    GO_OFFLINE: "/api/driver/go-offline",
-    UPDATE_LOCATION: "/api/driver/location",
-    ORDER_NOT_ACCEPTED: (orderId: string) =>
-      `/api/driver/orders/${orderId}/not-accepted`,
-    ORDER_RETURNED: (orderId: string) =>
-      `/api/driver/orders/${orderId}/returned`,
-    SHIFTS: "/api/driver/shifts",
-    SHIFT_BY_ID: (shiftId: string) => `/api/driver/shifts/${shiftId}`,
-    BULK_SHIFTS: "/api/driver/shifts/bulk",
-    IN_SHIFT: "/api/driver/shifts/in-shift",
-    DOCUMENTS: "/api/driver/documents",
-    DOCUMENT_BY_ID: (documentId: string) =>
-      `/api/driver/documents/${documentId}`,
+  WALLET: {
+    SUMMARY: "/api/wallet",
+    TRANSACTIONS: "/api/wallet/transactions",
+    TRANSACTION_BY_ID: (id: string) => `/api/wallet/transactions/${id}`,
+    WITHDRAWALS: "/api/wallet/withdrawals",
+    WITHDRAWAL_BY_ID: (id: string) => `/api/wallet/withdrawals/${id}`,
+    PAYMENT_NUMBERS: "/api/wallet/payment-numbers",
+    TOPUP: "/api/wallet/topup",
+    TOPUP_BY_ID: (id: string) => `/api/wallet/topup/${id}`,
+    TRANSFER_LOOKUP: "/api/wallet/transfer/lookup",
+    TRANSFERS: "/api/wallet/transfers",
+    TRANSFER_BY_ID: (id: string) => `/api/wallet/transfers/${id}`,
+    PIN_STATUS: "/api/wallet/pin/status",
+    PIN_SET: "/api/wallet/pin/set",
+    PIN_CHANGE: "/api/wallet/pin/change",
+    PIN_RESET: "/api/wallet/pin/reset",
   },
 
   // ============================================
-  // Notifications (shared)
+  // Notifications
   // ============================================
   NOTIFICATIONS: {
     BASE: "/api/notifications",
     UNREAD_COUNT: "/api/notifications/unread-count",
-    MARK_READ: (notificationId: string) =>
-      `/api/notifications/${notificationId}/read`,
+    BY_ID: (id: string) => `/api/notifications/${id}`,
+    MARK_READ: (id: string) => `/api/notifications/${id}/read`,
     MARK_ALL_READ: "/api/notifications/read-all",
-    DELETE: (notificationId: string) => `/api/notifications/${notificationId}`,
-    DELETE_ALL: "/api/notifications/clear-all",
+    PREFERENCES: "/api/notifications/preferences",
   },
 
   // ============================================
-  // Upload (authenticated)
+  // Files
   // ============================================
-  UPLOAD: {
-    IMAGE: "/api/upload/image",
-    IMAGE_URL: "/api/upload/image/url",
-    DOCUMENT: "/api/upload/document",
-    MULTIPLE: "/api/upload/multiple",
+  FILES: {
+    UPLOAD: "/api/files/upload",
+    UPLOAD_MULTIPLE: "/api/files/upload-multiple",
+    DELETE: (path: string) => `/api/files/${path}`,
+    INFO: "/api/files/info",
+  },
+
+  // ============================================
+  // Chat
+  // ============================================
+  CHAT: {
+    BASE: "/api/chat",
+    BY_ID: (id: string) => `/api/chat/${id}`,
+    MESSAGES: (id: string) => `/api/chat/${id}/messages`,
+    MESSAGES_ATTACHMENT: (id: string) => `/api/chat/${id}/messages/attachment`,
+    ATTACHMENTS: (id: string) => `/api/chat/${id}/attachments`,
+    READ: (id: string) => `/api/chat/${id}/read`,
+    CLOSE: (id: string) => `/api/chat/${id}/close`,
+    UNREAD_COUNT: "/api/chat/unread-count",
+  },
+
+  // ============================================
+  // Cities
+  // ============================================
+  CITIES: {
+    LOOKUP: "/api/cities/lookup",
+    BY_ID: (id: string) => `/api/cities/${id}`,
+    BROWSE: "/api/cities/browse",
+    AREAS: (id: string) => `/api/cities/${id}/areas`,
   },
 } as const;
 
@@ -119,13 +124,12 @@ export const ENDPOINTS = {
 // Helpers
 // ============================================
 
-/** Resolves a relative endpoint path against the configured base URL in production. */
 export const getApiUrl = (endpoint: string): string => {
   if (import.meta.env.DEV) {
     return endpoint;
   }
   const baseUrl = import.meta.env.VITE_API_BASE_URL;
-  return `${baseUrl}${endpoint}`;
+  return `${baseUrl ?? ""}${endpoint}`;
 };
 
 export const isDev = import.meta.env.DEV;

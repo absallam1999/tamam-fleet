@@ -5,7 +5,7 @@ import React, {
   type KeyboardEvent,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "@app/providers/AuthProvider";
+import { useAuth, type UserRole } from "@app/providers/AuthProvider";
 import { useLanguage } from "@/shared/hooks/useLanguage";
 import { useToast } from "@shared/components/Toaster";
 import { cn } from "@shared/utils/cn";
@@ -13,22 +13,12 @@ import { cn } from "@shared/utils/cn";
 // ============================================
 // Phone Validation & Formatting
 // ============================================
-
-/**
- * Validates phone numbers.
- * Accepts: 01xxxxxxxxx, +201xxxxxxxxx, 201xxxxxxxxx
- */
 const PHONE_REGEX = /^(\+?2)?01[0-25-9]\d{8}$/;
 
 function isValidEgyptianPhone(phone: string): boolean {
   return PHONE_REGEX.test(phone.trim());
 }
 
-/**
- * Formats phone number for API submission.
- * Strips any prefix and ensures consistent format.
- * Output: "01xxxxxxxxx" (11 digits starting with 01)
- */
 function formatPhoneForApi(phone: string): string {
   let cleaned = phone.replace(/[^\d]/g, ""); // Remove all non-digits
 
@@ -43,6 +33,12 @@ function formatPhoneForApi(phone: string): string {
 
   return cleaned; // Returns "01xxxxxxxxx"
 }
+
+// ============================================
+// Constants
+// ============================================
+
+const SUPERVISOR_ROLE: UserRole = "Supervisor";
 
 // ============================================
 // Error Extractor
@@ -115,7 +111,6 @@ const t = {
   verify: { ar: "تأكيد", en: "Verify" },
   verifying: { ar: "جاري التحقق...", en: "Verifying..." },
   resendCode: { ar: "إعادة إرسال الرمز", en: "Resend code" },
-  changePhone: { ar: "تغيير رقم الهاتف", en: "Change phone number" },
   codeSentSuccess: { ar: "تم إرسال رمز التحقق", en: "Verification code sent" },
   successTitle: { ar: "تم التحقق", en: "Verified" },
   successMessage: {
@@ -238,7 +233,7 @@ export const ForgotPasswordPage: React.FC = () => {
     try {
       await sendOtp({
         phoneNumber: formattedPhone,
-        role: 4,
+        role: SUPERVISOR_ROLE
       });
 
       toast.success(lang(t.codeSentSuccess));
@@ -320,7 +315,7 @@ export const ForgotPasswordPage: React.FC = () => {
       await verifyOtp({
         phoneNumber: formattedPhone,
         code: code,
-        role: 4,
+        role: SUPERVISOR_ROLE,
       });
 
       setIsVerified(true);
@@ -346,7 +341,7 @@ export const ForgotPasswordPage: React.FC = () => {
     try {
       await sendOtp({
         phoneNumber: formattedPhone,
-        role: 4,
+        role: SUPERVISOR_ROLE,
       });
       toast.success(lang(t.codeSentSuccess));
       setResendCooldown(60);
@@ -734,20 +729,7 @@ export const ForgotPasswordPage: React.FC = () => {
             {fieldError}
           </p>
         )}
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => {
-              setStep("phone");
-              setOtp(["", "", "", "", "", ""]);
-              setError(null);
-              setFieldError(null);
-            }}
-            disabled={isSubmitting}
-            className="text-sm text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-300 transition-colors"
-          >
-            {lang(t.changePhone)}
-          </button>
+        <div className="flex items-center justify-center w-full">
           <button
             type="button"
             onClick={handleResend}

@@ -4,6 +4,7 @@ import { useAuth } from "@app/providers/AuthProvider";
 import { useLanguage } from "@/shared/hooks/useLanguage";
 import { useToast } from "@shared/components/Toaster";
 import { cn } from "@shared/utils/cn";
+import type { UserRole } from "@app/providers/AuthProvider";
 
 // ============================================
 // Types
@@ -19,6 +20,12 @@ interface ValidationErrors {
   phoneNumber?: string;
   password?: string;
 }
+
+// ============================================
+// Constants
+// ============================================
+
+const SUPERVISOR_ROLE: UserRole = "Supervisor";
 
 // ============================================
 // Translations
@@ -45,6 +52,17 @@ const t = {
     en: "Successfully signed in",
   },
   errorMessage: { ar: "فشل تسجيل الدخول", en: "Login failed" },
+
+  noAccount: {
+    ar: "ليس لديك حساب؟",
+    en: "Don't have an account?",
+  },
+  register: {
+    ar: "سجّل كمشرف",
+    en: "Register as supervisor",
+  },
+  orDivider: { ar: "أو", en: "or" },
+
   validation: {
     phoneNumberRequired: {
       ar: "رقم الهاتف مطلوب",
@@ -142,9 +160,11 @@ export const LoginPage: React.FC = () => {
       await login({
         phoneNumber: formData.phoneNumber.trim(),
         password: formData.password,
-        role: 4,
+        role: SUPERVISOR_ROLE,
         remember: formData.rememberMe,
       });
+
+      // Save last-session metadata
       try {
         const session = {
           device: navigator.platform || "Unknown Device",
@@ -533,6 +553,35 @@ export const LoginPage: React.FC = () => {
             </>
           )}
         </button>
+
+        <div className="relative pt-2">
+          <div className="absolute inset-0 flex items-center" aria-hidden="true">
+            <div className="w-full border-t border-surface-200 dark:border-surface-700" />
+          </div>
+          <div className="relative flex justify-center">
+            <span className="bg-surface-50 dark:bg-surface-950 px-3 text-xs font-medium uppercase tracking-wider text-surface-400 dark:text-surface-500">
+              {lang(t.orDivider)}
+            </span>
+          </div>
+        </div>
+
+        <div className="text-center">
+          <p className="text-sm text-surface-500 dark:text-surface-400">
+            {lang(t.noAccount)}{" "}
+            <Link
+              to="/auth/register"
+              className={cn(
+                "font-semibold",
+                "text-primary-600 dark:text-primary-400",
+                "hover:text-primary-700 dark:hover:text-primary-300",
+                "hover:underline underline-offset-2",
+                "transition-colors",
+              )}
+            >
+              {lang(t.register)}
+            </Link>
+          </p>
+        </div>
       </form>
     </div>
   );

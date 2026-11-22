@@ -3,14 +3,18 @@ import { useLanguage } from "@/shared/hooks/useLanguage";
 import { useToast } from "@shared/components/Toaster";
 import { cn } from "@shared/utils/cn";
 import { formatTime, formatDate } from "@shared/utils/formatters";
+import { resolveMediaUrl } from "@/shared/utils/Parser";
 import {
   useSupportTickets,
   useSendMessage,
   useCreateTicket,
   useTicketMessages,
+  useMarkTicketRead,
+  useCloseTicket,
+  useSendChatAttachment,
 } from "@shared/hooks/useFleetSupport";
 import { useFleetOrders } from "@shared/hooks/useFleetOrders";
-import type { SupportTicketDto, SupportMessageDto } from "@shared/types";
+import type { MessageDto } from "@shared/types";
 
 // ============================================================
 // Translations
@@ -37,66 +41,84 @@ const t = {
     ar: "اكتب رسالتك هنا...",
     en: "Type your message here...",
   },
-  priority: { ar: "الأولوية", en: "Priority" },
-  low: { ar: "منخفضة", en: "Low" },
-  medium: { ar: "متوسطة", en: "Medium" },
-  high: { ar: "عالية", en: "High" },
-  urgent: { ar: "عاجلة", en: "Urgent" },
   status: { ar: "الحالة", en: "Status" },
   open: { ar: "مفتوح", en: "Open" },
-  inProgress: { ar: "قيد المعالجة", en: "In Progress" },
-  resolved: { ar: "تم الحل", en: "Resolved" },
   closed: { ar: "مغلق", en: "Closed" },
+  closeTicket: { ar: "إغلاق التذكرة", en: "Close Ticket" },
+  closeConfirm: {
+    ar: "هل تريد إغلاق هذه التذكرة؟",
+    en: "Close this ticket?",
+  },
   send: { ar: "إرسال", en: "Send" },
   sending: { ar: "جاري الإرسال...", en: "Sending..." },
   cancel: { ar: "إلغاء", en: "Cancel" },
   create: { ar: "إنشاء", en: "Create" },
   creating: { ar: "جاري الإنشاء...", en: "Creating..." },
   typeMessage: { ar: "اكتب رسالتك...", en: "Type your message..." },
-  online: { ar: "متصل", en: "Online" },
-  offline: { ar: "غير متصل", en: "Offline" },
-  supportTeam: { ar: "فريق الدعم", en: "Support Team" },
   selectTicket: { ar: "اختر تذكرة", en: "Select a ticket" },
   selectTicketDesc: {
     ar: "اختر تذكرة من القائمة لعرض المحادثة",
     en: "Select a ticket from the list to view the conversation",
   },
   noMessages: { ar: "لا توجد رسائل", en: "No messages yet" },
-  noMessagesDesc: {
+  startConversation: {
     ar: "ابدأ المحادثة بإرسال رسالة",
     en: "Start the conversation by sending a message",
   },
   attachFile: { ar: "إرفاق ملف", en: "Attach File" },
   maxFileSize: { ar: "الحد الأقصى 5MB", en: "Max 5MB" },
-  support: { ar: "الدعم الفني", en: "Support" },
   back: { ar: "رجوع", en: "Back" },
-  replied: { ar: "تم الرد", en: "Replied" },
-  awaitingReply: { ar: "في انتظار الرد", en: "Awaiting reply" },
   loadMessages: { ar: "جارٍ تحميل الرسائل...", en: "Loading messages..." },
-  noMessagesYet: { ar: "لا توجد رسائل بعد", en: "No messages yet" },
-  startConversation: {
-    ar: "ابدأ المحادثة بإرسال رسالة",
-    en: "Start the conversation by sending a message",
-  },
-  ticketInfo: { ar: "معلومات التذكرة", en: "Ticket Info" },
   created: { ar: "تم الإنشاء", en: "Created" },
-  order: { ar: "الطلب", en: "Order" },
-  noOrder: { ar: "بدون طلب", en: "No order" },
+  optionalOrder: { ar: "مرتبط بطلب (اختياري)", en: "Related Order (Optional)" },
+  noOrder: { ar: "بدون طلب (تذكرة عامة)", en: "No order (General ticket)" },
+  fileUploadError: { ar: "فشل إرفاق الملف", en: "Failed to attach file" },
+  fileTooLarge: {
+    ar: "حجم الملف يجب أن يكون أقل من 5MB",
+    en: "File size must be less than 5MB",
+  },
+  ticketClosed: { ar: "تم إغلاق التذكرة", en: "Ticket closed" },
+  closeError: { ar: "فشل إغلاق التذكرة", en: "Failed to close ticket" },
+  attachment: { ar: "ملف مرفق", en: "Attachment" },
+  tapToDownload: { ar: "انقر للتحميل", en: "Tap to download" },
+  tapToView: { ar: "انقر للعرض", en: "Tap to view" },
 } as const;
 
 const lang = (key: keyof typeof t, isAr: boolean) =>
   isAr ? t[key].ar : t[key].en;
 
 // ============================================================
-// Types
+// Helper
 // ============================================================
 
-interface Ticket extends SupportTicketDto {
-  messages?: SupportMessageDto[];
-}
+const formatTicketPreview = (
+  preview: string | null | undefined,
+  isAr: boolean,
+): string => {
+  if (!preview) return "";
+  const trimmed = preview.trim();
+  if (!trimmed) return "";
+
+  const lower = trimmed.toLowerCase();
+
+  // Image placeholder
+  if (lower === "image" || lower === "📷" || lower === "📷 image") {
+    return isAr ? "صورة" : "Image";
+  }
+
+  // Attachment / File placeholders
+  if (lower === "attachment" || lower === "📎" || lower === "📎 attachment") {
+    return isAr ? "مرفق" : "Attachment";
+  }
+  if (lower === "file" || lower === "📎 file") {
+    return isAr ? "ملف" : "File";
+  }
+
+  return trimmed;
+};
 
 // ============================================================
-// Skeleton Loader (responsive)
+// Skeleton Loader
 // ============================================================
 
 const SkeletonLoader: React.FC<{ isAr: boolean }> = ({ isAr }) => {
@@ -104,7 +126,6 @@ const SkeletonLoader: React.FC<{ isAr: boolean }> = ({ isAr }) => {
 
   return (
     <div className="h-[calc(100dvh-80px)] flex flex-col bg-white dark:bg-surface-900 rounded-2xl overflow-hidden border border-surface-200 dark:border-surface-800">
-      {/* Header Skeleton */}
       <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200 dark:border-surface-800 bg-surface-50/50 dark:bg-surface-900/50">
         <div className="space-y-2">
           <div className="skeleton h-6 w-32 rounded-lg" />
@@ -113,9 +134,7 @@ const SkeletonLoader: React.FC<{ isAr: boolean }> = ({ isAr }) => {
         <div className="skeleton h-10 w-28 sm:w-36 rounded-xl" />
       </div>
 
-      {/* Main Content Skeleton */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Ticket List Skeleton (hidden on mobile if no selection, but we keep visual) */}
         <div className="hidden md:flex w-80 flex-col border-l border-surface-200 dark:border-surface-800 bg-surface-50/30 dark:bg-surface-900/30 p-4">
           <div className="flex items-center justify-between mb-4">
             <div className="skeleton h-4 w-28 rounded-lg" />
@@ -139,7 +158,6 @@ const SkeletonLoader: React.FC<{ isAr: boolean }> = ({ isAr }) => {
           </div>
         </div>
 
-        {/* Chat Area Skeleton */}
         <div className="flex-1 flex flex-col bg-white dark:bg-surface-900">
           <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200 dark:border-surface-800 bg-surface-50/30 dark:bg-surface-900/30">
             <div className="flex items-center gap-3">
@@ -185,87 +203,6 @@ const SkeletonLoader: React.FC<{ isAr: boolean }> = ({ isAr }) => {
 };
 
 // ============================================================
-// Priority Badge
-// ============================================================
-
-const PriorityBadge: React.FC<{ priority: string; isAr: boolean }> = ({
-  priority,
-  isAr,
-}) => {
-  const config: Record<
-    string,
-    { bg: string; label: string; icon: React.ReactNode }
-  > = {
-    Low: {
-      bg: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20",
-      label: lang("low", isAr),
-      icon: (
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 7a1 1 0 100-2 1 1 0 000 2z"
-            clipRule="evenodd"
-          />
-        </svg>
-      ),
-    },
-    Medium: {
-      bg: "bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20",
-      label: lang("medium", isAr),
-      icon: (
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 7a1 1 0 100-2 1 1 0 000 2z"
-            clipRule="evenodd"
-          />
-        </svg>
-      ),
-    },
-    High: {
-      bg: "bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-400 border-red-200 dark:border-red-500/20",
-      label: lang("high", isAr),
-      icon: (
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 7a1 1 0 100-2 1 1 0 000 2z"
-            clipRule="evenodd"
-          />
-        </svg>
-      ),
-    },
-    Urgent: {
-      bg: "bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-500/20",
-      label: lang("urgent", isAr),
-      icon: (
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 7a1 1 0 100-2 1 1 0 000 2z"
-            clipRule="evenodd"
-          />
-        </svg>
-      ),
-    },
-  };
-
-  const c = config[priority] || config.Medium;
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border",
-        c.bg,
-      )}
-    >
-      {c.icon}
-      {c.label}
-    </span>
-  );
-};
-
-// ============================================================
 // Status Badge
 // ============================================================
 
@@ -278,16 +215,6 @@ const StatusBadge: React.FC<{ status: string; isAr: boolean }> = ({
       bg: "bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20",
       dot: "bg-blue-500",
       label: lang("open", isAr),
-    },
-    InProgress: {
-      bg: "bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20",
-      dot: "bg-amber-500",
-      label: lang("inProgress", isAr),
-    },
-    Resolved: {
-      bg: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20",
-      dot: "bg-emerald-500",
-      label: lang("resolved", isAr),
     },
     Closed: {
       bg: "bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 border-surface-200 dark:border-surface-700",
@@ -312,86 +239,255 @@ const StatusBadge: React.FC<{ status: string; isAr: boolean }> = ({
 };
 
 // ============================================================
-// Message Bubble - Modern & Clean
+// Message Bubble
 // ============================================================
 
 const MessageBubble: React.FC<{
-  message: SupportMessageDto;
+  message: MessageDto;
   isOwn: boolean;
   isAr: boolean;
 }> = ({ message, isOwn, isAr }) => {
-  const isRTL = isAr;
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  const attachmentUrl = resolveMediaUrl(message.attachmentUrl);
+  const avatarUrl = resolveMediaUrl(message.senderProfilePictureUrl);
+
+  const isImage =
+    message.messageType === "Image" && !!attachmentUrl && !imageError;
+  const isFile = !!attachmentUrl && !isImage;
+  const attachmentName = message.content?.trim();
+
+  // Close lightbox on Escape
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxOpen]);
 
   return (
-    <div
-      className={cn(
-        "flex items-end gap-3 animate-fade-in",
-        isOwn
-          ? isRTL
-            ? "flex-row-reverse"
-            : "flex-row"
-          : isRTL
-            ? "flex-row"
-            : "flex-row-reverse",
-      )}
-    >
+    <>
       <div
         className={cn(
-          "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold",
-          isOwn
-            ? "bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-500/20"
-            : "bg-gradient-to-br from-surface-200 to-surface-300 dark:from-surface-700 dark:to-surface-600 text-surface-700 dark:text-surface-300",
+          "flex items-end gap-3 animate-fade-in max-w-full w-fit",
+          isOwn ? "me-auto flex-row" : "ms-auto flex-row-reverse",
         )}
       >
-        {isOwn ? "م" : "د"}
-      </div>
-
-      <div
-        className={cn(
-          "max-w-[70%] px-4 py-2.5 text-sm leading-relaxed shadow-sm",
-          isOwn
-            ? "bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-primary-500/20"
-            : "bg-white dark:bg-surface-800 text-surface-900 dark:text-white border border-surface-200 dark:border-surface-700",
-          "rounded-2xl",
-          isRTL && isOwn ? "rounded-tr-none" : "",
-          isRTL && !isOwn ? "rounded-tl-none" : "",
-          !isRTL && isOwn ? "rounded-tr-none" : "",
-          !isRTL && !isOwn ? "rounded-tl-none" : "",
-        )}
-      >
-        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+        {/* Avatar */}
         <div
           className={cn(
-            "flex items-center gap-1.5 mt-1.5",
-            isRTL ? "justify-start" : "justify-end",
+            "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold overflow-hidden",
+            isOwn
+              ? "bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-500/20"
+              : "bg-gradient-to-br from-surface-200 to-surface-300 dark:from-surface-700 dark:to-surface-600 text-surface-700 dark:text-surface-300",
           )}
         >
-          <span
-            className={cn(
-              "text-[10px]",
-              isOwn
-                ? "text-white/70"
-                : "text-surface-400 dark:text-surface-500",
-            )}
-          >
-            {formatTime(message.createdAt)}
-          </span>
-          {isOwn && (
-            <svg
-              className="w-3 h-3 text-white/50"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={message.senderName ?? ""}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : isOwn ? (
+            isAr ? (
+              "أ"
+            ) : (
+              "Y"
+            )
+          ) : isAr ? (
+            "د"
+          ) : (
+            "S"
           )}
         </div>
+
+        {/* Bubble */}
+        <div
+          className={cn(
+            "text-sm leading-relaxed shadow-sm rounded-2xl overflow-hidden",
+            isImage ? "w-56 max-w-[70vw] p-2" : "max-w-[70%] px-4 py-2.5",
+            isOwn
+              ? "bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-primary-500/20 rounded-ss-none"
+              : "bg-white dark:bg-surface-800 text-surface-900 dark:text-white border border-surface-200 dark:border-surface-700 rounded-se-none",
+          )}
+        >
+          {/* Inline image */}
+          {isImage && attachmentUrl && (
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              className={cn(
+                "relative block w-full aspect-square rounded-lg overflow-hidden cursor-zoom-in group",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                isOwn
+                  ? "focus-visible:ring-white/70 focus-visible:ring-offset-primary-600"
+                  : "focus-visible:ring-primary-500/70 focus-visible:ring-offset-white dark:focus-visible:ring-offset-surface-800",
+                "border",
+                isOwn
+                  ? "border-white/15"
+                  : "border-surface-200/60 dark:border-surface-700/60",
+              )}
+              aria-label={lang("tapToView", isAr)}
+            >
+              <img
+                src={attachmentUrl}
+                alt={attachmentName ?? ""}
+                loading="lazy"
+                draggable={false}
+                className="w-full h-full object-cover block select-none pointer-events-none transition-transform duration-300 group-hover:scale-[1.03]"
+                onError={() => setImageError(true)}
+              />
+              {/* Subtle inner ring for depth */}
+              <div className="absolute inset-0 ring-1 ring-inset ring-black/5 dark:ring-white/5 rounded-lg pointer-events-none" />
+              {/* Hover gradient */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/25 via-black/0 to-black/0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none" />
+              {/* Zoom hint icon */}
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                <div className="p-2 rounded-full bg-black/50 backdrop-blur-sm shadow-lg">
+                  <svg
+                    className="w-4 h-4 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                    />
+                  </svg>
+                </div>
+              </div>
+            </button>
+          )}
+
+          {/* File card */}
+          {isFile && attachmentUrl && (
+            <a
+              href={attachmentUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              download
+              className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
+            >
+              <div
+                className={cn(
+                  "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                  isOwn
+                    ? "bg-white/20 text-white"
+                    : "bg-primary-50 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400",
+                )}
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                  />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-medium truncate max-w-[180px]">
+                  {attachmentName || lang("attachment", isAr)}
+                </p>
+                <p
+                  className={cn(
+                    "text-[10px]",
+                    isOwn
+                      ? "text-white/70"
+                      : "text-surface-500 dark:text-surface-400",
+                  )}
+                >
+                  {lang("tapToDownload", isAr)}
+                </p>
+              </div>
+            </a>
+          )}
+
+          {/* Text content */}
+          {message.content && !attachmentUrl && (
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          )}
+
+          {/* Timestamp + sent check */}
+          <div className={cn("flex items-center gap-1.5 mt-1.5 justify-end")}>
+            <span
+              className={cn(
+                "text-[10px]",
+                isOwn
+                  ? "text-white/70"
+                  : "text-surface-400 dark:text-surface-500",
+              )}
+            >
+              {formatTime(message.createdAt)}
+            </span>
+            {isOwn && (
+              <svg
+                className="w-3 h-3 text-white/50"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+
+      {/* Lightbox */}
+      {lightboxOpen && attachmentUrl && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setLightboxOpen(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxOpen(false)}
+            className="absolute top-4 end-4 p-2.5 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors z-10"
+            aria-label={isAr ? "إغلاق" : "Close"}
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2.5}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18 18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+          <img
+            src={attachmentUrl}
+            alt=""
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
   );
 };
 
@@ -410,38 +506,29 @@ export const SupportPage: React.FC = () => {
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [newTicketSubject, setNewTicketSubject] = useState("");
   const [newTicketMessage, setNewTicketMessage] = useState("");
-  const [newTicketPriority, setNewTicketPriority] = useState<string>("Medium");
-  const [isCreating, setIsCreating] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const {
-    data: tickets,
-    isLoading: ticketsLoading,
-    refetch: refetchTickets,
-  } = useSupportTickets();
-  const {
-    data: messages = [],
-    refetch: refetchMessages,
-    isLoading: messagesLoading,
-  } = useTicketMessages(selectedTicketId || "");
+  const { data: tickets = [], isLoading: ticketsLoading } = useSupportTickets();
+  const { data: messages = [], isLoading: messagesLoading } = useTicketMessages(
+    selectedTicketId ?? "",
+  );
   const sendMessage = useSendMessage();
   const createTicket = useCreateTicket();
+  const markRead = useMarkTicketRead();
+  const closeTicket = useCloseTicket();
+  const sendAttachment = useSendChatAttachment();
+
+  // Combine pending + active orders from the fleet hook
   const { pendingOrders = [], activeOrders = [] } = useFleetOrders();
   const recentOrders = [...pendingOrders, ...activeOrders];
 
-  const selectedTicket = (tickets as Ticket[])?.find(
-    (t) => t.id === selectedTicketId,
-  );
+  const selectedTicket = tickets.find((t) => t.id === selectedTicketId);
 
-  useEffect(() => {
-    if (selectedTicketId) refetchMessages();
-  }, [selectedTicketId, refetchMessages]);
-
+  // Auto-scroll on new messages
   useEffect(() => {
     if (messagesEndRef.current) {
       setTimeout(
@@ -451,9 +538,17 @@ export const SupportPage: React.FC = () => {
     }
   }, [messages]);
 
+  // Mark read whenever a ticket is opened
+  useEffect(() => {
+    if (selectedTicketId) {
+      markRead.mutate(selectedTicketId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTicketId]);
+
   const handleSendMessage = useCallback(async () => {
-    if (!newMessage.trim() || !selectedTicketId || isSending) return;
-    setIsSending(true);
+    if (!newMessage.trim() || !selectedTicketId || sendMessage.isPending)
+      return;
     try {
       await sendMessage.mutateAsync({
         ticketId: selectedTicketId,
@@ -461,43 +556,29 @@ export const SupportPage: React.FC = () => {
       });
       setNewMessage("");
       textareaRef.current?.focus();
-      await refetchMessages();
-      await refetchTickets();
     } catch {
       toast.error(isAr ? "فشل إرسال الرسالة" : "Failed to send message");
-    } finally {
-      setIsSending(false);
     }
-  }, [
-    newMessage,
-    selectedTicketId,
-    isSending,
-    sendMessage,
-    refetchMessages,
-    refetchTickets,
-    isAr,
-    toast,
-  ]);
+  }, [newMessage, selectedTicketId, sendMessage, isAr, toast]);
 
   const handleCreateTicket = useCallback(async () => {
-    if (!newTicketSubject.trim() || !newTicketMessage.trim() || isCreating)
+    if (
+      !newTicketSubject.trim() ||
+      !newTicketMessage.trim() ||
+      createTicket.isPending
+    )
       return;
-    setIsCreating(true);
     try {
-      const ticket = await createTicket.mutateAsync({
+      const conversation = await createTicket.mutateAsync({
         subject: newTicketSubject.trim(),
         message: newTicketMessage.trim(),
-        priority: newTicketPriority,
-        orderId: selectedOrderId || null,
+        orderId: selectedOrderId || undefined,
       });
       setShowNewTicket(false);
       setNewTicketSubject("");
       setNewTicketMessage("");
-      setNewTicketPriority("Medium");
       setSelectedOrderId("");
-      setSelectedTicketId(ticket.id);
-      await refetchTickets();
-      await refetchMessages();
+      setSelectedTicketId(conversation.id);
       toast.success(
         isAr ? "تم إنشاء التذكرة بنجاح" : "Ticket created successfully",
       );
@@ -506,21 +587,49 @@ export const SupportPage: React.FC = () => {
         err?.message ||
           (isAr ? "فشل إنشاء التذكرة" : "Failed to create ticket"),
       );
-    } finally {
-      setIsCreating(false);
     }
   }, [
     newTicketSubject,
     newTicketMessage,
-    isCreating,
     createTicket,
-    newTicketPriority,
     selectedOrderId,
-    refetchTickets,
-    refetchMessages,
     isAr,
     toast,
   ]);
+
+  const handleCloseTicket = useCallback(async () => {
+    if (!selectedTicketId || closeTicket.isPending) return;
+    try {
+      await closeTicket.mutateAsync({ ticketId: selectedTicketId });
+      toast.success(lang("ticketClosed", isAr));
+    } catch {
+      toast.error(lang("closeError", isAr));
+    }
+  }, [selectedTicketId, closeTicket, isAr, toast]);
+
+  const handleFileSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file || !selectedTicketId || sendAttachment.isPending) return;
+
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error(lang("fileTooLarge", isAr));
+        return;
+      }
+
+      try {
+        await sendAttachment.mutateAsync({
+          ticketId: selectedTicketId,
+          file,
+          messageType: file.type.startsWith("image/") ? "Image" : "File",
+        });
+      } catch {
+        toast.error(lang("fileUploadError", isAr));
+      }
+    },
+    [selectedTicketId, sendAttachment, isAr, toast],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -532,6 +641,7 @@ export const SupportPage: React.FC = () => {
     [handleSendMessage],
   );
 
+  // Auto-size textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -611,16 +721,19 @@ export const SupportPage: React.FC = () => {
                 {lang("myTickets", isAr)}
               </span>
               <span className="text-xs font-medium text-surface-600 dark:text-surface-400 bg-surface-200 dark:bg-surface-800 px-2.5 py-0.5 rounded-full">
-                {tickets?.length || 0}
+                {tickets.length}
               </span>
             </div>
 
-            {tickets && tickets.length > 0 ? (
+            {tickets.length > 0 ? (
               <div className="space-y-2">
                 {tickets.map((ticket) => {
                   const isActive = ticket.id === selectedTicketId;
-                  const lastMessage =
-                    ticket.messages?.[ticket.messages.length - 1];
+                  const previewText = formatTicketPreview(
+                    ticket.lastMessagePreview,
+                    isAr,
+                  );
+
                   return (
                     <button
                       key={ticket.id}
@@ -635,19 +748,36 @@ export const SupportPage: React.FC = () => {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {ticket.subject}
-                          </p>
-                          {lastMessage && (
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-medium truncate">
+                              {ticket.subject ??
+                                (isAr ? "تذكرة دعم" : "Support Ticket")}
+                            </p>
+                            {ticket.unreadCount > 0 && (
+                              <span className="flex-shrink-0 bg-primary-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                                {ticket.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                          {previewText ? (
                             <p className="text-xs text-surface-500 dark:text-surface-400 truncate mt-1">
-                              {lastMessage.content}
+                              {previewText}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-surface-400 dark:text-surface-500 mt-1 italic">
+                              {lang("noMessages", isAr)}
                             </p>
                           )}
                         </div>
                         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                          <StatusBadge status={ticket.status} isAr={isAr} />
+                          <StatusBadge
+                            status={ticket.status ?? "Open"}
+                            isAr={isAr}
+                          />
                           <span className="text-[10px] text-surface-400">
-                            {formatTime(ticket.updatedAt)}
+                            {formatTime(
+                              ticket.lastMessageAt ?? ticket.createdAt,
+                            )}
                           </span>
                         </div>
                       </div>
@@ -675,6 +805,9 @@ export const SupportPage: React.FC = () => {
                 <p className="text-sm font-medium text-surface-500 dark:text-surface-400">
                   {lang("noTickets", isAr)}
                 </p>
+                <p className="text-xs text-surface-400 dark:text-surface-500 mt-0.5">
+                  {lang("noTicketsDesc", isAr)}
+                </p>
                 <button
                   onClick={() => setShowNewTicket(true)}
                   className="mt-4 px-5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition-colors shadow-lg shadow-primary-500/20"
@@ -695,7 +828,7 @@ export const SupportPage: React.FC = () => {
         >
           {selectedTicket ? (
             <>
-              {/* Chat Header with back button on mobile */}
+              {/* Chat Header */}
               <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-surface-200 dark:border-surface-800 bg-gradient-to-r from-surface-50/50 to-surface-100/30 dark:from-surface-900/50 dark:to-surface-800/30">
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                   <button
@@ -738,12 +871,12 @@ export const SupportPage: React.FC = () => {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-surface-900 dark:text-white truncate">
-                      {selectedTicket.subject}
+                      {selectedTicket.subject ??
+                        (isAr ? "تذكرة دعم" : "Support Ticket")}
                     </p>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      <StatusBadge status={selectedTicket.status} isAr={isAr} />
-                      <PriorityBadge
-                        priority={selectedTicket.priority}
+                      <StatusBadge
+                        status={selectedTicket.status ?? "Open"}
                         isAr={isAr}
                       />
                       <span className="text-[10px] text-surface-400 hidden sm:inline">
@@ -754,10 +887,32 @@ export const SupportPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-                  <span className="flex items-center gap-1.5 text-xs text-surface-500 bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-1 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    {lang("online", isAr)}
-                  </span>
+                  {selectedTicket.status === "Open" ? (
+                    <button
+                      onClick={handleCloseTicket}
+                      disabled={closeTicket.isPending}
+                      className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                    >
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2.5}
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M6 18 18 6M6 6l12 12"
+                        />
+                      </svg>
+                      {lang("closeTicket", isAr)}
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-xs text-surface-500 bg-surface-100 dark:bg-surface-800 px-2.5 py-1 rounded-full">
+                      {lang("closed", isAr)}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -791,11 +946,11 @@ export const SupportPage: React.FC = () => {
                     </div>
                   </div>
                 ) : messages.length > 0 ? (
-                  messages.map((msg, idx) => (
+                  messages.map((msg) => (
                     <MessageBubble
-                      key={msg.id || idx}
+                      key={msg.id}
                       message={msg}
-                      isOwn={msg.userType === "Fleet"}
+                      isOwn={msg.senderType === "Fleet"}
                       isAr={isAr}
                     />
                   ))
@@ -832,7 +987,11 @@ export const SupportPage: React.FC = () => {
                 <div className="flex items-end gap-2">
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="p-2.5 rounded-xl text-surface-400 hover:text-surface-600 dark:text-surface-500 dark:hover:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors flex-shrink-0"
+                    disabled={
+                      selectedTicket.status === "Closed" ||
+                      sendAttachment.isPending
+                    }
+                    className="p-2.5 rounded-xl text-surface-400 hover:text-surface-600 dark:text-surface-500 dark:hover:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors flex-shrink-0 disabled:opacity-50"
                     title={lang("attachFile", isAr)}
                   >
                     <svg
@@ -854,6 +1013,7 @@ export const SupportPage: React.FC = () => {
                     type="file"
                     className="hidden"
                     accept="image/*,.pdf,.doc,.docx"
+                    onChange={handleFileSelect}
                   />
                   <textarea
                     ref={textareaRef}
@@ -861,8 +1021,9 @@ export const SupportPage: React.FC = () => {
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={lang("typeMessage", isAr)}
+                    disabled={selectedTicket.status === "Closed"}
                     className={cn(
-                      "flex-1 resize-none rounded-xl px-3 sm:px-4 py-2.5 text-sm bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-white placeholder:text-surface-400 dark:placeholder:text-surface-500 border-2 border-surface-200 dark:border-surface-700 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:bg-surface-50 dark:focus:bg-surface-800/50 transition-all min-h-[44px] max-h-32",
+                      "flex-1 resize-none rounded-xl px-3 sm:px-4 py-2.5 text-sm bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-white placeholder:text-surface-400 dark:placeholder:text-surface-500 border-2 border-surface-200 dark:border-surface-700 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:bg-surface-50 dark:focus:bg-surface-800/50 transition-all min-h-[44px] max-h-32 disabled:opacity-60",
                       isRTL && "text-right",
                     )}
                     rows={1}
@@ -870,10 +1031,14 @@ export const SupportPage: React.FC = () => {
                   />
                   <button
                     onClick={handleSendMessage}
-                    disabled={!newMessage.trim() || isSending}
+                    disabled={
+                      !newMessage.trim() ||
+                      sendMessage.isPending ||
+                      selectedTicket.status === "Closed"
+                    }
                     className="px-4 sm:px-5 py-2.5 rounded-xl text-sm font-medium transition-all bg-primary-600 text-white hover:bg-primary-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0 shadow-lg shadow-primary-500/20"
                   >
-                    {isSending ? (
+                    {sendMessage.isPending ? (
                       <>
                         <svg
                           className="w-4 h-4 animate-spin"
@@ -900,8 +1065,11 @@ export const SupportPage: React.FC = () => {
                       </>
                     ) : (
                       <>
+                        <span className="hidden sm:inline">
+                          {lang("send", isAr)}
+                        </span>
                         <svg
-                          className="w-4 h-4"
+                          className={cn("w-4 h-4", isAr && "-scale-x-100")}
                           fill="none"
                           viewBox="0 0 24 24"
                           strokeWidth={2.5}
@@ -913,9 +1081,6 @@ export const SupportPage: React.FC = () => {
                             d="M6 12L3.269 3.126A59.768 59.768 0 0 1 21.485 12 59.77 59.77 0 0 1 3.27 20.876L5.999 12Zm0 0h7.5"
                           />
                         </svg>
-                        <span className="hidden sm:inline">
-                          {lang("send", isAr)}
-                        </span>
                       </>
                     )}
                   </button>
@@ -959,7 +1124,7 @@ export const SupportPage: React.FC = () => {
         </div>
       </div>
 
-      {/* New Ticket Modal (responsive) */}
+      {/* New Ticket Modal */}
       {showNewTicket && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
@@ -1015,44 +1180,26 @@ export const SupportPage: React.FC = () => {
                   className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-white placeholder:text-surface-400 dark:placeholder:text-surface-500 border-2 border-surface-200 dark:border-surface-700 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:bg-surface-50 dark:focus:bg-surface-800/50 transition-all"
                 />
               </div>
+
               {/* Order Selection */}
               <div className={cn("space-y-1.5", isRTL && "text-right")}>
                 <label className="block text-xs font-medium text-surface-700 dark:text-surface-300">
-                  {isAr ? "مرتبط بطلب (اختياري)" : "Related Order (Optional)"}
+                  {lang("optionalOrder", isAr)}
                 </label>
                 <select
                   value={selectedOrderId}
                   onChange={(e) => setSelectedOrderId(e.target.value)}
                   className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-white border-2 border-surface-200 dark:border-surface-700 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:bg-surface-50 dark:focus:bg-surface-800/50 transition-all"
                 >
-                  <option value="">
-                    {isAr
-                      ? "بدون طلب (تذكرة عامة)"
-                      : "No order (General ticket)"}
-                  </option>
+                  <option value="">{lang("noOrder", isAr)}</option>
                   {recentOrders.map((order) => (
-                    <option key={order.id} value={order.id}>
+                    <option key={order.orderId} value={order.orderId}>
                       #{order.orderNumber} — {order.totalAmount} EGP
                     </option>
                   ))}
                 </select>
               </div>
-              {/* Priority */}
-              <div className={cn("space-y-1.5", isRTL && "text-right")}>
-                <label className="block text-xs font-medium text-surface-700 dark:text-surface-300">
-                  {lang("priority", isAr)}
-                </label>
-                <select
-                  value={newTicketPriority}
-                  onChange={(e) => setNewTicketPriority(e.target.value)}
-                  className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-white border-2 border-surface-200 dark:border-surface-700 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:bg-surface-50 dark:focus:bg-surface-800/50 transition-all"
-                >
-                  <option value="Low">{lang("low", isAr)}</option>
-                  <option value="Medium">{lang("medium", isAr)}</option>
-                  <option value="High">{lang("high", isAr)}</option>
-                  <option value="Urgent">{lang("urgent", isAr)}</option>
-                </select>
-              </div>
+
               {/* Message */}
               <div className={cn("space-y-1.5", isRTL && "text-right")}>
                 <label className="block text-xs font-medium text-surface-700 dark:text-surface-300">
@@ -1066,11 +1213,12 @@ export const SupportPage: React.FC = () => {
                   className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-white placeholder:text-surface-400 dark:placeholder:text-surface-500 border-2 border-surface-200 dark:border-surface-700 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:bg-surface-50 dark:focus:bg-surface-800/50 transition-all resize-none"
                 />
               </div>
+
               {/* Buttons */}
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={() => setShowNewTicket(false)}
-                  disabled={isCreating}
+                  disabled={createTicket.isPending}
                   className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors disabled:opacity-50"
                 >
                   {lang("cancel", isAr)}
@@ -1080,11 +1228,11 @@ export const SupportPage: React.FC = () => {
                   disabled={
                     !newTicketSubject.trim() ||
                     !newTicketMessage.trim() ||
-                    isCreating
+                    createTicket.isPending
                   }
                   className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all shadow-lg shadow-primary-500/20"
                 >
-                  {isCreating ? (
+                  {createTicket.isPending ? (
                     <>
                       <svg
                         className="w-4 h-4 animate-spin"

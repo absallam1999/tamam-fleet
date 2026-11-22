@@ -1,13 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useLanguage } from "@/shared/hooks/useLanguage";
 import { PageLoader } from "@shared/components/PageLoader";
 import { cn } from "@shared/utils/cn";
 import { getRelativeTime } from "@shared/utils/formatters";
-import {
-  useDriverDetail,
-  useToggleDriverAvailability,
-} from "@shared/hooks/useFleetDrivers";
+import { useDriverDetail } from "@shared/hooks/useFleetDrivers";
 
 // ============================================
 // Translations
@@ -24,29 +21,28 @@ const t = {
   driverInfo: { ar: "معلومات السائق", en: "Driver Information" },
   vehicleInfo: { ar: "معلومات المركبة", en: "Vehicle Information" },
   contactInfo: { ar: "معلومات الاتصال", en: "Contact Information" },
-  stats: { ar: "إحصائيات", en: "Statistics" },
 
   // Fields
   fullName: { ar: "الاسم الكامل", en: "Full Name" },
   phone: { ar: "رقم الهاتف", en: "Phone Number" },
   email: { ar: "البريد الإلكتروني", en: "Email" },
   status: { ar: "الحالة", en: "Status" },
-  joinedDate: { ar: "تاريخ الانضمام", en: "Joined Date" },
+  verified: { ar: "موثّق", en: "Verified" },
+  unverified: { ar: "غير موثّق", en: "Unverified" },
   lastActive: { ar: "آخر نشاط", en: "Last Active" },
+  city: { ar: "المدينة", en: "City" },
   vehicleType: { ar: "نوع المركبة", en: "Vehicle Type" },
   vehiclePlate: { ar: "رقم اللوحة", en: "Plate Number" },
   rating: { ar: "التقييم", en: "Rating" },
   totalTrips: { ar: "إجمالي الرحلات", en: "Total Trips" },
-  completedTrips: { ar: "الرحلات المكتملة", en: "Completed Trips" },
-  cancelledTrips: { ar: "الرحلات الملغية", en: "Cancelled Trips" },
+  completedTrips: { ar: "رحلات اليوم", en: "Today's Trips" },
   onTimePercentage: { ar: "نسبة الالتزام", en: "On-Time Rate" },
+  noDataYet: { ar: "غير متوفر بعد", en: "Not tracked yet" },
 
-  // Statuses
+  // Statuses — only 3 exist in DriverLiveStatus
   available: { ar: "متاح", en: "Available" },
   on_trip: { ar: "في رحلة", en: "On Trip" },
   off_duty: { ar: "خارج الخدمة", en: "Off Duty" },
-  on_leave: { ar: "في إجازة", en: "On Leave" },
-  suspended: { ar: "موقوف", en: "Suspended" },
 
   // Documents
   documentsTitle: { ar: "المستندات", en: "Documents" },
@@ -55,22 +51,16 @@ const t = {
     ar: "المستندات المرفوعة ستظهر هنا",
     en: "Uploaded documents will appear here",
   },
-  uploadDocument: { ar: "رفع مستند", en: "Upload Document" },
 
-  // Actions
-  toggleAvailability: { ar: "تبديل الحالة", en: "Toggle Status" },
-
-  // Loading
+  // Loading / error
   loading: { ar: "جاري تحميل بيانات السائق...", en: "Loading driver data..." },
   error: { ar: "فشل تحميل البيانات", en: "Failed to load data" },
   retry: { ar: "إعادة المحاولة", en: "Retry" },
   driverNotFound: { ar: "السائق غير موجود", en: "Driver not found" },
-  viewDetails: { ar: "عرض التفاصيل", en: "View Details" },
-  notAvailable: { ar: "غير متوفر", en: "N/A" },
 };
 
 // ============================================
-// Status Config
+// Status Config — aligned with DriverLiveStatus
 // ============================================
 const getStatusConfig = (isAr: boolean) => ({
   available: {
@@ -90,18 +80,6 @@ const getStatusConfig = (isAr: boolean) => ({
     className:
       "bg-surface-100 text-surface-600 border-surface-200 dark:bg-surface-800 dark:text-surface-400 dark:border-surface-700",
     dot: "bg-surface-400",
-  },
-  on_leave: {
-    label: isAr ? t.on_leave.ar : t.on_leave.en,
-    className:
-      "bg-warning-50 text-warning-700 border-warning-200 dark:bg-warning-500/10 dark:text-warning-400 dark:border-warning-500/20",
-    dot: "bg-warning-500",
-  },
-  suspended: {
-    label: isAr ? t.suspended.ar : t.suspended.en,
-    className:
-      "bg-error-50 text-error-700 border-error-200 dark:bg-error-500/10 dark:text-error-400 dark:border-error-500/20",
-    dot: "bg-error-500",
   },
 });
 
@@ -146,6 +124,7 @@ export const DriverDetailsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"overview" | "documents">(
     "overview",
   );
+
   const {
     data: driver,
     isLoading,
@@ -153,15 +132,6 @@ export const DriverDetailsPage: React.FC = () => {
     error,
     refetch,
   } = useDriverDetail(driverId);
-  const toggleDriverAvailability = useToggleDriverAvailability();
-
-  const handleToggleAvailability = useCallback(() => {
-    if (driverId) {
-      toggleDriverAvailability.mutate(driverId, {
-        onSuccess: () => refetch(),
-      });
-    }
-  }, [driverId, toggleDriverAvailability, refetch]);
 
   // Loading State
   if (isLoading) return <PageLoader message={lang(t.loading)} />;
@@ -208,6 +178,9 @@ export const DriverDetailsPage: React.FC = () => {
     statusConfig[driver.status as keyof typeof statusConfig] ||
     statusConfig.off_duty;
 
+  // City label — prefer English for consistency, fallback to Arabic
+  const cityLabel = driver.cityEn ?? driver.cityAr ?? null;
+
   return (
     <div className="space-y-6 animate-fade-in pb-8">
       {/* Header Card */}
@@ -245,9 +218,7 @@ export const DriverDetailsPage: React.FC = () => {
                   ? "bg-success-100 dark:bg-success-500/10 text-success-600 dark:text-success-400"
                   : driver.status === "on_trip"
                     ? "bg-primary-100 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400"
-                    : driver.status === "suspended"
-                      ? "bg-error-100 dark:bg-error-500/10 text-error-600 dark:text-error-400"
-                      : "bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400",
+                    : "bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400",
               )}
             >
               <span className="text-2xl font-bold">
@@ -256,9 +227,32 @@ export const DriverDetailsPage: React.FC = () => {
             </div>
 
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-surface-100 truncate">
-                {driver.fullName}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-surface-100 truncate">
+                  {driver.fullName}
+                </h1>
+                {/* ⭐ Verified badge (from API isVerified) */}
+                {driver.isVerified && (
+                  <span
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-500 text-white flex-shrink-0"
+                    title={lang(t.verified)}
+                  >
+                    <svg
+                      className="w-3 h-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={3}
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="m4.5 12.75 6 6 9-13.5"
+                      />
+                    </svg>
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-2 mt-1.5">
                 <span
                   className={cn(
@@ -271,7 +265,12 @@ export const DriverDetailsPage: React.FC = () => {
                   />
                   {config.label}
                 </span>
-                {driver.rating && (
+                {!driver.isVerified && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-warning-50 text-warning-700 border border-warning-200 dark:bg-warning-500/10 dark:text-warning-400 dark:border-warning-500/20">
+                    {lang(t.unverified)}
+                  </span>
+                )}
+                {driver.rating > 0 && (
                   <span className="inline-flex items-center gap-1 text-xs text-surface-500 dark:text-surface-400">
                     <svg
                       className="w-3.5 h-3.5 text-warning-500"
@@ -287,36 +286,8 @@ export const DriverDetailsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Actions */}
+          {/* Actions — Edit only (toggle removed) */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              onClick={handleToggleAvailability}
-              disabled={toggleDriverAvailability.isPending}
-              className={cn(
-                "px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200",
-                "bg-surface-100 text-surface-700 hover:bg-surface-200 dark:bg-surface-800 dark:text-surface-300 dark:hover:bg-surface-700",
-                "active:scale-[0.98] disabled:opacity-50",
-                "flex items-center gap-1.5",
-              )}
-            >
-              <svg
-                className={cn(
-                  "w-4 h-4",
-                  toggleDriverAvailability.isPending && "animate-spin",
-                )}
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
-                />
-              </svg>
-              {lang(t.toggleAvailability)}
-            </button>
             <Link
               to={`/dashboard/drivers/${driver.id}/edit`}
               className={cn(
@@ -471,7 +442,9 @@ export const DriverDetailsPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-surface-900 dark:text-surface-100">
-                    {driver.onTimePercentage || 0}%
+                    {driver.onTimePercentage > 0
+                      ? `${driver.onTimePercentage}%`
+                      : "-"}
                   </p>
                   <p className="text-xs text-surface-500 dark:text-surface-400">
                     {lang(t.onTimePercentage)}
@@ -488,7 +461,7 @@ export const DriverDetailsPage: React.FC = () => {
               <div className="flex items-center gap-3 mb-5 pb-3 border-b border-surface-100 dark:border-surface-800">
                 <div className="w-9 h-9 rounded-xl bg-primary-100 dark:bg-primary-500/10 flex items-center justify-center">
                   <svg
-                    className="w-4.5 h-4.5 text-primary-600 dark:text-primary-400"
+                    className="w-4 h-4 text-primary-600 dark:text-primary-400"
                     fill="none"
                     viewBox="0 0 24 24"
                     strokeWidth={1.5}
@@ -512,26 +485,21 @@ export const DriverDetailsPage: React.FC = () => {
                   isAr={isAr}
                 />
                 <InfoRow
-                  label={lang(t.joinedDate)}
-                  value={
-                    driver.joinedDate
-                      ? new Date(driver.joinedDate).toLocaleDateString(
-                          isAr ? "ar-EG" : "en-US",
-                          { year: "numeric", month: "short", day: "numeric" },
-                        )
-                      : null
-                  }
-                  isAr={isAr}
-                />
-                <InfoRow
                   label={lang(t.lastActive)}
                   value={
-                    driver.lastActiveDate
-                      ? getRelativeTime(driver.lastActiveDate)
+                    driver.lastLocationUpdateAt
+                      ? getRelativeTime(driver.lastLocationUpdateAt)
                       : null
                   }
                   isAr={isAr}
                 />
+                {cityLabel && (
+                  <InfoRow
+                    label={lang(t.city)}
+                    value={cityLabel}
+                    isAr={isAr}
+                  />
+                )}
               </div>
             </div>
 
@@ -540,7 +508,7 @@ export const DriverDetailsPage: React.FC = () => {
               <div className="flex items-center gap-3 mb-5 pb-3 border-b border-surface-100 dark:border-surface-800">
                 <div className="w-9 h-9 rounded-xl bg-success-100 dark:bg-success-500/10 flex items-center justify-center">
                   <svg
-                    className="w-4.5 h-4.5 text-success-600 dark:text-success-400"
+                    className="w-4 h-4 text-success-600 dark:text-success-400"
                     fill="none"
                     viewBox="0 0 24 24"
                     strokeWidth={1.5}
@@ -578,7 +546,7 @@ export const DriverDetailsPage: React.FC = () => {
               <div className="flex items-center gap-3 mb-5 pb-3 border-b border-surface-100 dark:border-surface-800">
                 <div className="w-9 h-9 rounded-xl bg-warning-100 dark:bg-warning-500/10 flex items-center justify-center">
                   <svg
-                    className="w-4.5 h-4.5 text-warning-600 dark:text-warning-400"
+                    className="w-4 h-4 text-warning-600 dark:text-warning-400"
                     fill="none"
                     viewBox="0 0 24 24"
                     strokeWidth={1.5}
@@ -638,22 +606,11 @@ export const DriverDetailsPage: React.FC = () => {
             <p className="text-sm text-surface-400 dark:text-surface-500 max-w-sm">
               {lang(t.noDocumentsDesc)}
             </p>
-            <button className="btn btn-primary btn-sm mt-5">
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 4.5v15m7.5-7.5h-15"
-                />
-              </svg>
-              {lang(t.uploadDocument)}
-            </button>
+            <p className="text-xs text-surface-400 dark:text-surface-500 mt-4 max-w-sm">
+              {isAr
+                ? "يرفع السائق مستنداته من تطبيق السائق مباشرة، ثم يمكنك مراجعتها والموافقة عليها من هنا."
+                : "Drivers upload documents from their own app. You'll review and approve them here once submitted."}
+            </p>
           </div>
         </div>
       )}

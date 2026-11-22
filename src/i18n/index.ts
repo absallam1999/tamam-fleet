@@ -15,13 +15,13 @@ const resources = {
 
 // Get initial language with proper priority
 const getInitialLanguage = (): string => {
-  // 1. Check localStorage first
+  // Check localStorage first
   const stored = localStorage.getItem("fleet-supervisor-language");
   if (stored && (stored === "ar" || stored === "en")) {
     return stored;
   }
 
-  // 2. If no stored preference, default to Arabic
+  // If no stored preference
   return "ar";
 };
 

@@ -1,11 +1,95 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { ENDPOINTS } from "@/config/api";
 import type {
-  SupportTicketDto,
-  SupportMessageDto,
-  CreateSupportTicketDto,
-  SendSupportMessageDto,
+  ConversationDto,
+  ConversationListItemDto,
+  CreateConversationDto,
+  MessageDto,
+  MessageType,
+  PagedResult,
+  SendMessageDto,
 } from "@shared/types";
+
+// ============================================================
+// Local types
+// ============================================================
+
+export interface ConversationCreatedDto {
+  id: string;
+  participantId: string;
+  participantType?: string | null;
+  customerId: string;
+  status?: string | null;
+  createdAt: string;
+  firstMessage: MessageDto;
+}
+
+export interface AttachmentUploadResultDto {
+  url: string | null;
+  fileName: string | null;
+  sizeInBytes: number;
+  contentType: string | null;
+  messageType: string | null;
+}
+
+// ============================================================
+// Input types
+// ============================================================
+
+export interface TicketListFilters {
+  pageIndex?: number;
+  pageSize?: number;
+  status?: string;
+  search?: string;
+  orderId?: string;
+  sortBy?: string;
+}
+
+export interface MessageListFilters {
+  pageIndex?: number;
+  pageSize?: number;
+  since?: string;
+  before?: string;
+  messageType?: MessageType;
+  order?: "asc" | "desc";
+}
+
+export interface CreateTicketInput {
+  subject: string;
+  message: string;
+  orderId?: string;
+}
+
+export interface SendTicketMessageInput {
+  ticketId: string;
+  content?: string;
+  attachmentUrl?: string;
+  messageType?: MessageType;
+}
+
+export interface SendAttachmentMessageInput {
+  ticketId: string;
+  file: File | Blob;
+  messageType?: MessageType;
+}
+
+export interface UploadAttachmentInput {
+  ticketId: string;
+  file: File | Blob;
+  messageType?: MessageType;
+}
+
+export interface CloseTicketInput {
+  ticketId: string;
+  reason?: string;
+}
+
+export interface ChatUnreadCount {
+  totalUnread: number;
+  conversationsWithUnread: number;
+  byConversation?: Record<string, number>;
+}
 
 // ============================================================
 // Query Keys
@@ -13,236 +97,260 @@ import type {
 
 export const SUPPORT_KEYS = {
   all: ["supportTickets"] as const,
-  tickets: () => [...SUPPORT_KEYS.all, "tickets"] as const,
+  tickets: (filters?: TicketListFilters) =>
+    filters
+      ? ([...SUPPORT_KEYS.all, "tickets", filters] as const)
+      : ([...SUPPORT_KEYS.all, "tickets"] as const),
   ticket: (id: string) => [...SUPPORT_KEYS.all, "ticket", id] as const,
-  messages: (ticketId: string) =>
-    [...SUPPORT_KEYS.all, "messages", ticketId] as const,
+  messages: (ticketId: string, filters?: MessageListFilters) =>
+    filters
+      ? ([...SUPPORT_KEYS.all, "messages", ticketId, filters] as const)
+      : ([...SUPPORT_KEYS.all, "messages", ticketId] as const),
+  unreadCount: () => [...SUPPORT_KEYS.all, "unreadCount"] as const,
 };
-
-// ============================================================
-// Helpers
-// ============================================================
-
-function unwrap<T>(response: unknown): T {
-  if (response === null || response === undefined || response === "") {
-    return undefined as unknown as T;
-  }
-
-  if (typeof response !== "object") return response as T;
-
-  const resp = response as Record<string, unknown>;
-
-  // Check for nested data structure
-  if ("data" in resp && resp.data !== null && resp.data !== undefined) {
-    const data = resp.data as Record<string, unknown>;
-
-    // Check for success wrapper
-    if (
-      ("success" in data || "Success" in data) &&
-      "data" in data &&
-      data.data !== null &&
-      data.data !== undefined
-    ) {
-      return data.data as T;
-    }
-
-    // Check for arrays
-    if ("items" in data) return data.items as T;
-    if ("tickets" in data) return data.tickets as T;
-    if ("conversations" in data) return data.conversations as T;
-    if ("messages" in data) return data.messages as T;
-
-    return data as T;
-  }
-
-  // Direct response with arrays
-  if ("items" in resp) return resp.items as T;
-  if ("tickets" in resp) return resp.tickets as T;
-  if ("conversations" in resp) return resp.conversations as T;
-  if ("messages" in resp) return resp.messages as T;
-
-  return response as T;
-}
 
 // ============================================================
 // Queries
 // ============================================================
 
 /**
- * GET /api/chat/conversations
- * Fetch all support tickets for fleet supervisor
+ * GET /api/chat
  */
-export const useSupportTickets = () => {
-  return useQuery<SupportTicketDto[]>({
-    queryKey: SUPPORT_KEYS.tickets(),
+export const useSupportTickets = (filters: TicketListFilters = {}) =>
+  useQuery<ConversationListItemDto[]>({
+    queryKey: SUPPORT_KEYS.tickets(filters),
     queryFn: async () => {
-      const response = await apiClient.get("/api/chat/conversations");
-      const data = unwrap<any>(response);
+      const params: Record<string, string | number> = {
+        PageIndex: filters.pageIndex ?? 1,
+        PageSize: filters.pageSize ?? 100,
+      };
+      if (filters.status) params.Status = filters.status;
+      if (filters.search) params.Search = filters.search;
+      if (filters.orderId) params.OrderId = filters.orderId;
+      if (filters.sortBy) params.SortBy = filters.sortBy;
 
-      let tickets: any[] = [];
-
-      if (Array.isArray(data)) {
-        tickets = data;
-      } else if (data?.items) {
-        tickets = data.items;
-      } else if (data?.tickets) {
-        tickets = data.tickets;
-      } else if (data?.conversations) {
-        tickets = data.conversations;
-      } else if (data?.data && Array.isArray(data.data)) {
-        tickets = data.data;
-      }
-
-      return tickets.map((t: any) => ({
-        id: t.id || "",
-        subject: t.subject || t.title || "Support Ticket",
-        status: t.status || "Open",
-        priority: t.priority || "Medium",
-        createdAt: t.createdAt || t.created_at || new Date().toISOString(),
-        updatedAt:
-          t.updatedAt ||
-          t.updated_at ||
-          t.createdAt ||
-          new Date().toISOString(),
-        messages: (t.recentMessages || t.messages || []).map((m: any) => ({
-          id: m.id || "",
-          ticketId: m.ticketId || m.conversationId || t.id || "",
-          content: m.content || m.body || m.message || "",
-          userType:
-            m.userType || (m.senderType === "Support" ? "Support" : "Fleet"),
-          userName: m.userName || m.senderName || m.sender_name || "",
-          createdAt: m.createdAt || m.created_at || new Date().toISOString(),
-          attachmentUrl: m.attachmentUrl || m.attachment_url || null,
-        })),
-        lastMessage:
-          t.lastMessage ||
-          (t.recentMessages?.length > 0
-            ? t.recentMessages[t.recentMessages.length - 1]
-            : null),
-      })) as SupportTicketDto[];
+      const res = await apiClient.get<PagedResult<ConversationListItemDto>>(
+        ENDPOINTS.CHAT.BASE,
+        params,
+      );
+      return res.data?.items ?? [];
     },
     staleTime: 30_000,
     refetchOnMount: true,
     retry: 2,
   });
-};
 
 /**
- * GET /api/chat/conversations/{conversationId}/messages
- * Fetch messages for a specific ticket
+ * GET /api/chat/{id}/messages
  */
-export const useTicketMessages = (ticketId: string) => {
-  return useQuery<SupportMessageDto[]>({
-    queryKey: SUPPORT_KEYS.messages(ticketId),
+export const useTicketMessages = (
+  ticketId: string,
+  filters: MessageListFilters = {},
+) =>
+  useQuery<MessageDto[]>({
+    queryKey: SUPPORT_KEYS.messages(ticketId, filters),
     queryFn: async () => {
-      const response = await apiClient.get(
-        `/api/chat/conversations/${ticketId}/messages`,
+      const params: Record<string, string | number> = {
+        PageIndex: filters.pageIndex ?? 1,
+        PageSize: filters.pageSize ?? 200,
+        Order: filters.order ?? "asc",
+      };
+      if (filters.since) params.Since = filters.since;
+      if (filters.before) params.Before = filters.before;
+      if (filters.messageType) params.MessageType = filters.messageType;
+
+      const res = await apiClient.get<PagedResult<MessageDto>>(
+        ENDPOINTS.CHAT.MESSAGES(ticketId),
+        params,
       );
-      const data = unwrap<any>(response);
-
-      let messages: any[] = [];
-
-      if (Array.isArray(data)) {
-        messages = data;
-      } else if (data?.items) {
-        messages = data.items;
-      } else if (data?.messages) {
-        messages = data.messages;
-      } else if (data?.data && Array.isArray(data.data)) {
-        messages = data.data;
-      }
-
-      return messages.map((m: any) => ({
-        id: m.id || "",
-        ticketId: m.ticketId || m.conversationId || ticketId || "",
-        content: m.content || m.body || m.message || "",
-        senderType:
-          m.senderType ||
-          m.sender_type ||
-          (m.userType === "Support" ? "Support" : "Fleet"),
-        senderName: m.senderName || m.sender_name || "",
-        userType:
-          m.userType || (m.senderType === "Support" ? "Support" : "Fleet"),
-        userName: m.userName || m.senderName || m.sender_name || "",
-        createdAt: m.createdAt || m.created_at || new Date().toISOString(),
-        attachmentUrl: m.attachmentUrl || m.attachment_url || null,
-      })) as SupportMessageDto[];
+      return res.data?.items ?? [];
     },
     enabled: !!ticketId,
     staleTime: 10_000,
-    refetchInterval: 5000, // poll for new messages
+    refetchInterval: 5_000,
     retry: 2,
   });
-};
+
+/**
+ * GET /api/chat/{id}
+ */
+export const useConversation = (ticketId: string) =>
+  useQuery<ConversationDto>({
+    queryKey: SUPPORT_KEYS.ticket(ticketId),
+    queryFn: async () => {
+      const res = await apiClient.get<ConversationDto>(
+        ENDPOINTS.CHAT.BY_ID(ticketId),
+      );
+      return res.data;
+    },
+    enabled: !!ticketId,
+    staleTime: 30_000,
+  });
+
+/**
+ * GET /api/chat/unread-count
+ */
+export const useChatUnreadCount = () =>
+  useQuery<ChatUnreadCount>({
+    queryKey: SUPPORT_KEYS.unreadCount(),
+    queryFn: async () => {
+      const res = await apiClient.get<ChatUnreadCount>(
+        ENDPOINTS.CHAT.UNREAD_COUNT,
+      );
+      return res.data;
+    },
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
 
 // ============================================================
 // Mutations
 // ============================================================
 
 /**
- * POST /api/chat/conversations
- * Create a new support ticket
+ * POST /api/chat
  */
 export const useCreateTicket = () => {
   const qc = useQueryClient();
-  return useMutation<SupportTicketDto, Error, CreateSupportTicketDto>({
-    mutationFn: async (dto) => {
-      const response = await apiClient.post("/api/chat/conversations", {
-        subject: dto.subject,
-        initialMessage: dto.message,
-        orderId: dto.orderId || null,
-      });
-      const data = unwrap<any>(response);
-      return {
-        id: data?.id || "",
-        subject: data?.subject || dto.subject,
-        status: data?.status || "Open",
-        priority: data?.priority || dto.priority || "Medium",
-        createdAt: data?.createdAt || new Date().toISOString(),
-        updatedAt: data?.updatedAt || new Date().toISOString(),
-        messages: [],
-      } as SupportTicketDto;
+  return useMutation<ConversationCreatedDto, Error, CreateTicketInput>({
+    mutationFn: async (input) => {
+      const payload: CreateConversationDto = {
+        subject: input.subject,
+        firstMessage: input.message,
+        orderId: input.orderId,
+      };
+      const res = await apiClient.post<ConversationCreatedDto>(
+        ENDPOINTS.CHAT.BASE,
+        payload,
+      );
+      return res.data;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.tickets() });
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.unreadCount() });
+    },
+  });
+};
+
+/**
+ * POST /api/chat/{id}/messages
+ */
+export const useSendMessage = () => {
+  const qc = useQueryClient();
+  return useMutation<MessageDto, Error, SendTicketMessageInput>({
+    mutationFn: async (input) => {
+      const messageType: MessageType =
+        input.messageType ?? (input.attachmentUrl ? "File" : "Text");
+
+      const payload: SendMessageDto = {
+        content: input.content,
+        attachmentUrl: input.attachmentUrl,
+        messageType,
+      };
+      const res = await apiClient.post<MessageDto>(
+        ENDPOINTS.CHAT.MESSAGES(input.ticketId),
+        payload,
+      );
+      return res.data;
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({
+        queryKey: SUPPORT_KEYS.messages(vars.ticketId),
+      });
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.tickets() });
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.unreadCount() });
+    },
+  });
+};
+
+/**
+ * POST /api/chat/{id}/messages/attachment
+ */
+export const useSendChatAttachment = () => {
+  const qc = useQueryClient();
+  return useMutation<MessageDto, Error, SendAttachmentMessageInput>({
+    mutationFn: async (input) => {
+      const formData = new FormData();
+      const fileName =
+        input.file instanceof File ? input.file.name : "attachment";
+      formData.append("File", input.file, fileName);
+      if (input.messageType) {
+        formData.append("MessageType", input.messageType);
+      }
+
+      const res = await apiClient.post<MessageDto>(
+        ENDPOINTS.CHAT.MESSAGES_ATTACHMENT(input.ticketId),
+        formData,
+      );
+      return res.data;
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({
+        queryKey: SUPPORT_KEYS.messages(vars.ticketId),
+      });
       qc.invalidateQueries({ queryKey: SUPPORT_KEYS.tickets() });
     },
   });
 };
 
 /**
- * POST /api/chat/conversations/{conversationId}/messages
- * Send a message in a ticket
+ * POST /api/chat/{id}/attachments
  */
-export const useSendMessage = () => {
-  const qc = useQueryClient();
-  return useMutation<SupportMessageDto, Error, SendSupportMessageDto>({
-    mutationFn: async (dto) => {
-      const response = await apiClient.post(
-        `/api/chat/conversations/${dto.ticketId}/messages`,
-        {
-          content: dto.content,
-          messageType: "Text",
-          attachmentUrl: dto.attachmentUrl || null,
-        },
+export const useUploadChatAttachment = () =>
+  useMutation<AttachmentUploadResultDto, Error, UploadAttachmentInput>({
+    mutationFn: async (input) => {
+      const formData = new FormData();
+      const fileName =
+        input.file instanceof File ? input.file.name : "attachment";
+      formData.append("File", input.file, fileName);
+      if (input.messageType) {
+        formData.append("MessageType", input.messageType);
+      }
+
+      const res = await apiClient.post<AttachmentUploadResultDto>(
+        ENDPOINTS.CHAT.ATTACHMENTS(input.ticketId),
+        formData,
       );
-      const data = unwrap<any>(response);
-      return {
-        id: data?.id || "",
-        ticketId: dto.ticketId,
-        content: data?.content || dto.content,
-        senderType: "Fleet",
-        senderName: data?.userName || data?.senderName || "",
-        userType: "Fleet",
-        userName: data?.userName || data?.senderName || "",
-        createdAt: data?.createdAt || new Date().toISOString(),
-        attachmentUrl: data?.attachmentUrl || null,
-      } as SupportMessageDto;
+      return res.data;
     },
-    onSuccess: (_, variables) => {
-      qc.invalidateQueries({
-        queryKey: SUPPORT_KEYS.messages(variables.ticketId),
-      });
+  });
+
+/**
+ * POST /api/chat/{id}/read
+ */
+export const useMarkTicketRead = () => {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: async (ticketId) => {
+      await apiClient.post<void>(ENDPOINTS.CHAT.READ(ticketId));
+    },
+    onSuccess: (_, ticketId) => {
       qc.invalidateQueries({ queryKey: SUPPORT_KEYS.tickets() });
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.unreadCount() });
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.messages(ticketId) });
+    },
+  });
+};
+
+/**
+ * POST /api/chat/{id}/close
+ */
+export const useCloseTicket = () => {
+  const qc = useQueryClient();
+  return useMutation<ConversationDto, Error, CloseTicketInput>({
+    mutationFn: async ({ ticketId, reason }) => {
+      const res = await apiClient.post<ConversationDto>(
+        ENDPOINTS.CHAT.CLOSE(ticketId),
+        { reason },
+      );
+      return res.data;
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.tickets() });
+      qc.invalidateQueries({
+        queryKey: SUPPORT_KEYS.messages(vars.ticketId),
+      });
+      qc.invalidateQueries({ queryKey: SUPPORT_KEYS.unreadCount() });
     },
   });
 };

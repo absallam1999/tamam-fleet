@@ -8,12 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@/app/providers/AuthProvider";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiError } from "@/lib/api-client";
 import { ENDPOINTS } from "@/config/api";
 import type {
-  DashboardAreaDto,
+  AreaSummaryDto,
   SupervisorDashboardDto,
-  SupervisorWalletDto,
+  SupervisorProfileDto,
+  WalletSummaryDto,
 } from "@shared/types";
 
 // ============================================================
@@ -21,11 +22,20 @@ import type {
 // ============================================================
 
 export interface SupervisorInfo {
+  id: string;
   fullName: string;
   email: string;
   phoneNumber: string;
+  profilePictureUrl: string | null;
   isActive: boolean;
-  walletBalance?: number;
+  isVerified: boolean;
+  verifiedAt: string | null;
+  cityId: string | null;
+  cityAr: string | null;
+  cityEn: string | null;
+  cityName: string | null;
+  createdAt: string | null;
+  walletBalance: number;
 }
 
 export interface DashboardStats {
@@ -39,9 +49,14 @@ export interface DashboardStats {
 interface FleetContextValue {
   supervisor: SupervisorInfo | null;
   stats: DashboardStats | null;
-  areas: DashboardAreaDto[] | null;
+  areas: AreaSummaryDto[];
+
   isLoading: boolean;
+
   isActive: boolean;
+  isVerified: boolean;
+  walletBalance: number;
+
   refreshDashboard: () => Promise<void>;
   error: string | null;
   getSupervisorName: () => string;
@@ -50,18 +65,25 @@ interface FleetContextValue {
 const FleetContext = createContext<FleetContextValue | undefined>(undefined);
 
 // ============================================================
-// Helper to extract inner `data` from API envelope
+// Helpers
 // ============================================================
-function extractApiData<T>(responseData: unknown): T | null {
-  if (
-    responseData &&
-    typeof responseData === "object" &&
-    "data" in responseData
-  ) {
-    return (responseData as Record<string, unknown>).data as T;
-  }
-  return responseData as T | null;
-}
+
+const EMPTY_STATS: DashboardStats = {
+  totalDrivers: 0,
+  onlineDrivers: 0,
+  pendingOrders: 0,
+  activeDeliveries: 0,
+  completedToday: 0,
+};
+
+const str = (v: unknown, fallback = ""): string =>
+  typeof v === "string" && v.length > 0 ? v : fallback;
+
+const nullableStr = (v: unknown, fallback: string | null = null): string | null =>
+  typeof v === "string" && v.length > 0 ? v : fallback;
+
+const num = (v: unknown, fallback = 0): number =>
+  typeof v === "number" && Number.isFinite(v) ? v : fallback;
 
 // ============================================================
 // Provider
@@ -76,106 +98,117 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
 
   const [supervisor, setSupervisor] = useState<SupervisorInfo | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [areas, setAreas] = useState<DashboardAreaDto[] | null>(null);
+  const [areas, setAreas] = useState<AreaSummaryDto[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const isActive = supervisor?.isActive ?? false;
+  const isVerified = supervisor?.isVerified ?? false;
+  const walletBalance = supervisor?.walletBalance ?? 0;
 
   const getSupervisorName = useCallback((): string => {
     return supervisor?.fullName ?? user?.fullName ?? "";
   }, [supervisor, user]);
 
   // ============================================================
-  // Build supervisor info from auth user
-  // ============================================================
-  useEffect(() => {
-    if (user) {
-      setSupervisor((prev) => ({
-        fullName: user.fullName || "",
-        email: user.email || "",
-        phoneNumber: user.phoneNumber || "",
-        isActive: user.isActive ?? true,
-        // Preserve existing wallet balance if already fetched
-        walletBalance: prev?.walletBalance,
-      }));
-    } else {
-      setSupervisor(null);
-    }
-  }, [user]);
-
-  // ============================================================
-  // Fetch Dashboard Stats, Areas, and Wallet
+  // Fetch in parallel
   // ============================================================
   const fetchDashboard = useCallback(async (): Promise<void> => {
     setError(null);
-    try {
-      const [dashboardResult, walletResult] = await Promise.allSettled([
+
+    const [profileResult, dashboardResult, walletResult] =
+      await Promise.allSettled([
+        apiClient.get<SupervisorProfileDto>(ENDPOINTS.SUPERVISOR.PROFILE),
         apiClient.get<SupervisorDashboardDto>(ENDPOINTS.SUPERVISOR.DASHBOARD),
-        apiClient.get<SupervisorWalletDto>(ENDPOINTS.SUPERVISOR.WALLET),
+        apiClient.get<WalletSummaryDto>(ENDPOINTS.WALLET.SUMMARY),
       ]);
 
-      // Process dashboard stats and areas
-      if (dashboardResult.status === "fulfilled") {
-        const envelope = dashboardResult.value.data;
-        const dashboardData = extractApiData<SupervisorDashboardDto>(envelope);
+    // ── Profile ──
+    const profile =
+      profileResult.status === "fulfilled" ? profileResult.value.data : null;
 
-        // Set stats
-        setStats({
-          totalDrivers: Number(dashboardData?.totalDrivers) || 0,
-          onlineDrivers: Number(dashboardData?.onlineDrivers) || 0,
-          pendingOrders: Number(dashboardData?.pendingOrders) || 0,
-          activeDeliveries: Number(dashboardData?.activeDeliveries) || 0,
-          completedToday: Number(dashboardData?.completedToday) || 0,
-        });
+    if (profile || user) {
+      setSupervisor((prev) => {
+        const cityAr = nullableStr(profile?.cityAr, prev?.cityAr ?? null);
+        const cityEn = nullableStr(profile?.cityEn, prev?.cityEn ?? null);
+        const cityName = cityEn ?? cityAr ?? prev?.cityName ?? null;
 
-        // Set areas
-        setAreas(dashboardData?.areas ?? []);
-      } else {
-        console.error("Dashboard fetch failed:", dashboardResult.reason);
-        setStats({
-          totalDrivers: 0,
-          onlineDrivers: 0,
-          pendingOrders: 0,
-          activeDeliveries: 0,
-          completedToday: 0,
-        });
-        setAreas(null);
-        setError("Failed to load dashboard statistics");
-      }
-
-      // Process wallet balance
-      if (walletResult.status === "fulfilled") {
-        const envelope = walletResult.value.data;
-        const walletData = extractApiData<SupervisorWalletDto>(envelope);
-        console.log("Wallet API raw data:", walletData);
-
-        if (walletData) {
-          setSupervisor((prev) =>
-            prev
-              ? { ...prev, walletBalance: walletData.walletBalance || 0 }
-              : null,
-          );
-        }
-      } else {
-        console.error("Wallet fetch failed:", walletResult.reason);
-      }
-
-      if (
-        dashboardResult.status === "rejected" &&
-        walletResult.status === "rejected"
-      ) {
-        setError("Unable to load dashboard data. Please try again.");
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load dashboard";
-      setError(message);
-      console.error("Unexpected dashboard fetch error:", err);
-    } finally {
-      setIsLoading(false);
+        return {
+          id: profile?.id ?? prev?.id ?? "",
+          fullName: str(
+            profile?.fullName,
+            prev?.fullName ?? user?.fullName ?? "",
+          ),
+          email: str(profile?.email, prev?.email ?? user?.email ?? ""),
+          phoneNumber: str(
+            profile?.phoneNumber,
+            prev?.phoneNumber ?? user?.phoneNumber ?? "",
+          ),
+          profilePictureUrl:
+            profile?.profilePictureUrl ?? prev?.profilePictureUrl ?? null,
+          isActive: user?.isActive ?? prev?.isActive ?? true,
+          isVerified: profile?.isVerified ?? prev?.isVerified ?? false,
+          verifiedAt: profile?.verifiedAt ?? prev?.verifiedAt ?? null,
+          cityId: profile?.cityId ?? prev?.cityId ?? null,
+          cityAr,
+          cityEn,
+          cityName,
+          createdAt: profile?.createdAt ?? prev?.createdAt ?? null,
+          walletBalance: prev?.walletBalance ?? 0,
+        };
+      });
     }
-  }, []);
+
+    // ── Dashboard ──
+    if (dashboardResult.status === "fulfilled") {
+      const d = dashboardResult.value.data;
+      if (d) {
+        setStats({
+          totalDrivers: num(d.totalDrivers),
+          onlineDrivers: num(d.onlineDrivers),
+          pendingOrders: num(d.pendingOrders),
+          activeDeliveries: num(d.activeDeliveries),
+          completedToday: num(d.completedToday),
+        });
+        setAreas(d.areas ?? []);
+      } else {
+        setStats(EMPTY_STATS);
+        setAreas([]);
+      }
+    } else {
+      setStats(EMPTY_STATS);
+      setAreas([]);
+    }
+
+    // ── Wallet ──
+    if (walletResult.status === "fulfilled") {
+      const w = walletResult.value.data;
+      if (w) {
+        setSupervisor((prev) =>
+          prev ? { ...prev, walletBalance: num(w.balance) } : prev,
+        );
+      }
+    }
+
+    // ── Error aggregation ──
+    const allFailed =
+      profileResult.status === "rejected" &&
+      dashboardResult.status === "rejected" &&
+      walletResult.status === "rejected";
+
+    if (allFailed) {
+      const firstError = profileResult.reason;
+      const message =
+        firstError instanceof ApiError
+          ? firstError.message
+          : firstError instanceof Error
+            ? firstError.message
+            : "Unable to load dashboard data. Please try again.";
+      setError(message);
+    }
+
+    setIsLoading(false);
+  }, [user]);
 
   const refreshDashboard = useCallback(async (): Promise<void> => {
     setIsLoading(true);
@@ -183,21 +216,23 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
   }, [fetchDashboard]);
 
   // ============================================================
-  // Load dashboard on auth
+  // Load on auth / clear on logout
   // ============================================================
   useEffect(() => {
     if (isAuthenticated) {
+      setIsLoading(true);
       fetchDashboard();
     } else {
       setSupervisor(null);
       setStats(null);
-      setAreas(null);
+      setAreas([]);
+      setError(null);
       setIsLoading(false);
     }
   }, [isAuthenticated, fetchDashboard]);
 
   // ============================================================
-  // Context Value
+  // Context value
   // ============================================================
   const contextValue = useMemo<FleetContextValue>(
     () => ({
@@ -206,6 +241,8 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
       areas,
       isLoading,
       isActive,
+      isVerified,
+      walletBalance,
       refreshDashboard,
       error,
       getSupervisorName,
@@ -216,6 +253,8 @@ export const FleetProvider: React.FC<FleetProviderProps> = ({ children }) => {
       areas,
       isLoading,
       isActive,
+      isVerified,
+      walletBalance,
       refreshDashboard,
       error,
       getSupervisorName,

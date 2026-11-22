@@ -1,102 +1,190 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useDeferredValue } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ENDPOINTS } from "@/config/api";
 import type {
-  DriverDto,
   SupervisorCreateDriverDto,
-  DriverFilterParams,
-  DriverStatus,
+  SupervisorUpdateDriverDto,
+  SupervisorDriverFilterDto,
+  DriverSupervisionDto,
+  PagedResult,
+  SupervisorProfileDto,
 } from "@shared/types";
 import { useToast } from "@shared/components/Toaster";
 import { useLanguage } from "@/shared/hooks/useLanguage";
+import { useAuth } from "@app/providers/AuthProvider";
+
+// ============================================
+// Keys
+// ============================================
 
 export const DRIVERS_KEY = "fleet-supervisor-drivers";
 export const DRIVER_DETAIL_KEY = "fleet-supervisor-driver-detail";
 
 // ============================================
+// UI-facing types
+// ============================================
+
+export type DriverStatus = "available" | "on_trip" | "off_duty";
+
+export interface DriverDto {
+  id: string;
+  fullName: string;
+  phoneNumber: string;
+  email?: string;
+  isOnline: boolean;
+  isVerified: boolean;
+  status: DriverStatus;
+  vehicleType?: string;
+  vehiclePlateNumber?: string;
+  cityId?: string | null;
+  cityAr?: string | null;
+  cityEn?: string | null;
+  rating: number;
+  totalTrips: number;
+  completedTrips: number;
+  onTimePercentage: number;
+  activeOrderId: string | null;
+  activeOrderStatus: string | null;
+  lastActiveDate?: string;
+  lastLocationUpdateAt: string | null;
+  currentLatitude: number;
+  currentLongitude: number;
+}
+
+export interface DriverFilterParams {
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+  status?: DriverStatus;
+}
+
+// ============================================
 // Helpers
 // ============================================
 
-/**
- * Extracts the inner `data` property from the API envelope.
- * Envelope: { success, message, data, errors, timestamp }
- */
-function extractApiData<T>(responseData: unknown): T {
-  if (
-    responseData &&
-    typeof responseData === "object" &&
-    "data" in responseData
-  ) {
-    return (responseData as Record<string, unknown>).data as T;
+function deriveStatus(d: DriverSupervisionDto): DriverStatus {
+  if (d.activeOrderId) {
+    const s = (d.activeOrderStatus ?? "").toLowerCase();
+    if (s !== "delivered" && s !== "cancelled") return "on_trip";
   }
-  return responseData as T;
+  if (d.isOnline) return "available";
+  return "off_duty";
 }
 
-/**
- * Maps API driver object to frontend DriverDto.
- * API returns `driverId` instead of `id`.
- */
-function mapDriver(driver: any): DriverDto {
-  const isOnline = Boolean(driver.isOnline);
-  const activeOrderId = driver.activeOrderId;
-  const activeOrderStatus = driver.activeOrderStatus;
-
-  // Derive status:
-  // - if activeOrderId exists and activeOrderStatus is something other than delivered → "on_trip"
-  // - else if isOnline → "available"
-  // - else → "off_duty"
-  let status: DriverStatus = isOnline ? "available" : "off_duty";
-  if (
-    activeOrderId &&
-    activeOrderStatus &&
-    activeOrderStatus.toLowerCase() !== "delivered"
-  ) {
-    status = "on_trip";
-  }
-
+/** Map Driver */
+function mapDriver(d: DriverSupervisionDto): DriverDto {
   return {
-    ...driver,
-    id: driver.driverId,
-    status,
-    totalTrips: driver.totalDeliveries ?? driver.totalTrips ?? 0,
-    completedTrips: driver.todayDeliveries ?? driver.completedTrips ?? 0,
-    onTimePercentage: driver.onTimePercentage ?? 0,
-    lastActiveDate:
-      driver.lastLocationUpdateAt ?? driver.lastActiveDate ?? undefined,
-    joinedDate: driver.joinedDate ?? undefined,
-    vehicleType: driver.vehicleType ?? undefined,
-    vehiclePlateNumber: driver.vehiclePlateNumber ?? undefined,
-    email: driver.email ?? undefined,
+    id: d.driverId,
+    fullName: d.fullName,
+    phoneNumber: d.phoneNumber,
+    isOnline: d.isOnline,
+    isVerified: d.isVerified,
+    status: deriveStatus(d),
+    vehicleType: d.vehicleType ?? undefined,
+    vehiclePlateNumber: d.vehiclePlateNumber ?? undefined,
+    cityId: d.cityId,
+    cityAr: d.cityAr,
+    cityEn: d.cityEn,
+    rating: d.rating,
+    totalTrips: d.totalDeliveries,
+    completedTrips: d.todayDeliveries,
+    onTimePercentage: 0,
+    activeOrderId: d.activeOrderId,
+    activeOrderStatus: d.activeOrderStatus,
+    lastLocationUpdateAt: d.lastLocationUpdateAt,
+    currentLatitude: d.currentLatitude,
+    currentLongitude: d.currentLongitude,
   };
 }
 
-// ============================================
-// Update DTO
-// ============================================
-
-export interface SupervisorUpdateDriverDto {
-  phoneNumber: string;
-  fullName: string;
-  vehicleType?: string;
-  vehiclePlateNumber?: string;
+function extractPage(raw: unknown): {
+  items: DriverSupervisionDto[];
+  totalCount: number;
+  totalPages: number;
+} {
+  if (Array.isArray(raw)) {
+    return {
+      items: raw as DriverSupervisionDto[],
+      totalCount: raw.length,
+      totalPages: 1,
+    };
+  }
+  if (raw && typeof raw === "object") {
+    const obj = raw as Partial<PagedResult<DriverSupervisionDto>> &
+      Record<string, unknown>;
+    const items = Array.isArray(obj.items)
+      ? (obj.items as DriverSupervisionDto[])
+      : [];
+    return {
+      items,
+      totalCount:
+        typeof obj.totalCount === "number" ? obj.totalCount : items.length,
+      totalPages: typeof obj.totalPages === "number" ? obj.totalPages : 1,
+    };
+  }
+  return { items: [], totalCount: 0, totalPages: 1 };
 }
 
 // ============================================
-// Mutations (standalone)
+// Mutations
 // ============================================
 
 export function useCreateDriver() {
   const toast = useToast();
   const navigate = useNavigate();
   const { currentLanguage } = useLanguage();
+  const { user, refreshProfile } = useAuth();
   const isAr = currentLanguage === "ar";
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (dto: SupervisorCreateDriverDto) => {
-      await apiClient.post(ENDPOINTS.SUPERVISOR.CREATE_DRIVER, dto);
+      const payload: SupervisorCreateDriverDto = { ...dto };
+
+      // ═══════════════════════════════════════════════════════════════
+      // Resolve cityId
+      // ═══════════════════════════════════════════════════════════════
+      if (!payload.cityId) {
+        let supervisorCityId = user?.cityId ?? null;
+
+        if (!supervisorCityId) {
+          try {
+            const profileRes = await apiClient.get<SupervisorProfileDto>(
+              ENDPOINTS.SUPERVISOR.PROFILE,
+            );
+            supervisorCityId = profileRes.data?.cityId ?? null;
+
+            // Sync the cache so this doesn't recur on the next call
+            if (supervisorCityId) void refreshProfile();
+          } catch (err) {
+            if (import.meta.env.DEV) {
+              console.error(
+                "[useCreateDriver] profile fetch failed while resolving cityId:",
+                err,
+              );
+            }
+          }
+        }
+
+        if (!supervisorCityId) {
+          throw new Error(
+            isAr
+              ? "لا توجد مدينة معيّنة لحساب المشرف. يرجى التواصل مع المسؤول لتعيين مدينتك أولاً."
+              : "No city is assigned to your supervisor account. Please contact an administrator to assign your city first.",
+          );
+        }
+
+        payload.cityId = supervisorCityId;
+      }
+
+      const response = await apiClient.post<DriverSupervisionDto>(
+        ENDPOINTS.SUPERVISOR.CREATE_DRIVER,
+        payload,
+      );
+      return response.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [DRIVERS_KEY] });
@@ -128,10 +216,17 @@ export function useUpdateDriver() {
       driverId: string;
       dto: SupervisorUpdateDriverDto;
     }) => {
-      await apiClient.put(ENDPOINTS.SUPERVISOR.UPDATE_DRIVER(driverId), dto);
+      const response = await apiClient.put<DriverSupervisionDto>(
+        ENDPOINTS.SUPERVISOR.UPDATE_DRIVER(driverId),
+        dto,
+      );
+      return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (_, { driverId }) => {
       queryClient.invalidateQueries({ queryKey: [DRIVERS_KEY] });
+      queryClient.invalidateQueries({
+        queryKey: [DRIVER_DETAIL_KEY, driverId],
+      });
       toast.success(
         isAr ? "تم حفظ بيانات السائق بنجاح" : "Driver updated successfully",
       );
@@ -145,39 +240,11 @@ export function useUpdateDriver() {
   });
 }
 
-export function useToggleDriverAvailability() {
-  const toast = useToast();
-  const { currentLanguage } = useLanguage();
-  const isAr = currentLanguage === "ar";
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (driverId: string) => {
-      await apiClient.patch(
-        ENDPOINTS.SUPERVISOR.TOGGLE_DRIVER_AVAILABILITY(driverId),
-      );
-    },
-    onSuccess: (_, driverId) => {
-      queryClient.invalidateQueries({ queryKey: [DRIVERS_KEY] });
-      queryClient.invalidateQueries({
-        queryKey: [DRIVER_DETAIL_KEY, driverId],
-      });
-      toast.success(
-        isAr ? "تم تحديث حالة السائق بنجاح" : "Driver status updated",
-      );
-    },
-    onError: (err: Error) => {
-      toast.error(
-        isAr ? "فشل تحديث حالة السائق" : "Failed to update driver status",
-        { description: err.message },
-      );
-    },
-  });
-}
-
 // ============================================
-// Main Page Hook
+// Page hook
 // ============================================
+
+const MAX_PAGE_SIZE = 1000;
 
 export function useDriversPage() {
   const navigate = useNavigate();
@@ -189,7 +256,6 @@ export function useDriversPage() {
   });
   const [search, setSearch] = useState("");
 
-  // Fetch ALL drivers (API returns array, no server pagination)
   const {
     data: allDrivers,
     isLoading,
@@ -199,28 +265,29 @@ export function useDriversPage() {
   } = useQuery<DriverDto[]>({
     queryKey: [DRIVERS_KEY],
     queryFn: async () => {
+      const params: SupervisorDriverFilterDto = {
+        PageIndex: 1,
+        PageSize: MAX_PAGE_SIZE,
+      };
       const response = await apiClient.get<unknown>(
         ENDPOINTS.SUPERVISOR.DRIVERS,
+        params as unknown as Record<string, string | number | boolean>,
       );
-      const envelope = response.data;
-      const innerData = extractApiData<unknown[]>(envelope);
-      if (!Array.isArray(innerData)) {
-        console.warn("Unexpected drivers response shape:", innerData);
-        return [];
-      }
-      return innerData.map(mapDriver);
+      const page = extractPage(response.data);
+      return page.items.map(mapDriver);
     },
     staleTime: 30_000,
   });
 
-  // Apply search, status filter, sorting, and pagination client-side
+  const deferredSearch = useDeferredValue(search);
+
+  // ── Client-side filter + sort ──
   const filteredDrivers = useMemo(() => {
     if (!allDrivers) return [];
     let result = [...allDrivers];
 
-    // Search
-    if (search.trim()) {
-      const term = search.trim().toLowerCase();
+    if (deferredSearch.trim()) {
+      const term = deferredSearch.trim().toLowerCase();
       result = result.filter(
         (d) =>
           d.fullName.toLowerCase().includes(term) ||
@@ -229,28 +296,28 @@ export function useDriversPage() {
       );
     }
 
-    // Status filter
     if (filters.status) {
       result = result.filter((d) => d.status === filters.status);
     }
 
-    // Sort
     const sortBy = filters.sortBy || "fullName";
     const sortOrder = filters.sortOrder || "asc";
     result.sort((a, b) => {
-      const aVal = (a[sortBy as keyof DriverDto] ?? "")
-        .toString()
-        .toLowerCase();
-      const bVal = (b[sortBy as keyof DriverDto] ?? "")
-        .toString()
-        .toLowerCase();
+      const aVal = String(a[sortBy as keyof DriverDto] ?? "").toLowerCase();
+      const bVal = String(b[sortBy as keyof DriverDto] ?? "").toLowerCase();
       if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
       if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
       return 0;
     });
 
     return result;
-  }, [allDrivers, search, filters.status, filters.sortBy, filters.sortOrder]);
+  }, [
+    allDrivers,
+    deferredSearch,
+    filters.status,
+    filters.sortBy,
+    filters.sortOrder,
+  ]);
 
   const totalCount = filteredDrivers.length;
   const totalPages = Math.max(
@@ -263,14 +330,11 @@ export function useDriversPage() {
     startIndex + (filters.pageSize || 10),
   );
 
-  // Mutations
   const createDriver = useCreateDriver();
-  const toggleDriverAvailability = useToggleDriverAvailability();
 
-  // Handlers
   const handleSearch = useCallback((value: string) => {
     setSearch(value);
-    setFilters((prev) => ({ ...prev, page: 1 }));
+    setFilters((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }));
   }, []);
 
   const handlePageChange = useCallback((page: number) => {
@@ -305,13 +369,6 @@ export function useDriversPage() {
     [navigate],
   );
 
-  const handleToggleAvailability = useCallback(
-    (driverId: string) => {
-      toggleDriverAvailability.mutate(driverId);
-    },
-    [toggleDriverAvailability],
-  );
-
   return {
     drivers,
     allFilteredDrivers: filteredDrivers,
@@ -324,31 +381,27 @@ export function useDriversPage() {
     filters,
     search,
     createDriver,
-    toggleDriverAvailability,
     handleSearch,
     handlePageChange,
     handleSort,
     handleStatusFilter,
     handleOpenCreate,
     handleOpenEdit,
-    handleToggleAvailability,
   };
 }
 
 // ============================================
-// Detail Query
+// Detail
 // ============================================
 
 export function useDriverDetail(driverId: string | undefined) {
   return useQuery<DriverDto>({
     queryKey: [DRIVER_DETAIL_KEY, driverId],
     queryFn: async () => {
-      const response = await apiClient.get<unknown>(
+      const response = await apiClient.get<DriverSupervisionDto>(
         ENDPOINTS.SUPERVISOR.DRIVER_BY_ID(driverId!),
       );
-      const envelope = response.data;
-      const data = extractApiData<any>(envelope);
-      return mapDriver(data);
+      return mapDriver(response.data);
     },
     enabled: !!driverId,
     staleTime: 30_000,
